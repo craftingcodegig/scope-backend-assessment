@@ -23,6 +23,12 @@ def list_showtimes(
     user: CurrentUser,
     theater_id: str | None = None,
     q: str | None = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+    movie_status: str | None = None,
+    format: str | None = None,
+    language: str | None = None,
+    rating: str | None = None,
+    auditorium: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> ShowtimePage:
@@ -40,6 +46,18 @@ def list_showtimes(
     # "Spider‑Man: Homecoming" and the trigram index can be used.
     if q and (needle := normalize_title(q)):
         query = query.where(Showtime.normalized_title.ilike(f"%{needle}%"))
+
+    exact_filters = {
+        Showtime.status: status_filter,
+        Showtime.movie_status: movie_status,
+        Showtime.format: format,
+        Showtime.language: language,
+        Showtime.rating: rating,
+        Showtime.auditorium: auditorium,
+    }
+    for column, value in exact_filters.items():
+        if value:
+            query = query.where(column == value)
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(

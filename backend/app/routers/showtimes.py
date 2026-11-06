@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,6 +18,10 @@ router = APIRouter(prefix="/showtimes", tags=["showtimes"])
 DbSession = Annotated[Session, Depends(get_db)]
 
 
+def _utc_midnight(day: date) -> datetime:
+    return datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+
+
 @router.get("", response_model=ShowtimePage)
 def list_showtimes(
     db: DbSession,
@@ -29,6 +34,8 @@ def list_showtimes(
     language: str | None = None,
     rating: str | None = None,
     auditorium: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> ShowtimePage:
@@ -58,6 +65,12 @@ def list_showtimes(
     for column, value in exact_filters.items():
         if value:
             query = query.where(column == value)
+
+    # Date filters are inclusive calendar days in UTC.
+    if start_date:
+        query = query.where(Showtime.start_time >= _utc_midnight(start_date))
+    if end_date:
+        query = query.where(Showtime.start_time < _utc_midnight(end_date + timedelta(days=1)))
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(

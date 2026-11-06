@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from . import models  # noqa: F401  (registers tables on Base.metadata)
 from .db import Base, engine
+from .routers import users
 
 
 class HealthResponse(BaseModel):
@@ -41,3 +42,6 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(timestamp=datetime.now(timezone.utc))
+
+
+app.include_router(users.router)

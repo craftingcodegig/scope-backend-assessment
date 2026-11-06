@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Table
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Table, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -63,3 +63,16 @@ class Showtime(Base):
     rating: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+Index("ix_showtimes_theater_start", Showtime.theater_id, Showtime.start_time)
+Index("ix_showtimes_status", Showtime.status)
+# Business rule: at most one active showtime per movie and start time per theater.
+Index(
+    "ux_showtimes_active_movie_start",
+    Showtime.theater_id,
+    Showtime.normalized_title,
+    Showtime.start_time,
+    unique=True,
+    postgresql_where=text("status = 'active'"),
+)

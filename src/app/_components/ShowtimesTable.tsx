@@ -24,6 +24,10 @@ interface ShowtimesTableProps {
   sortField: SortField;
   sortOrder: SortOrder;
   onSortChange: (field: SortField, order: SortOrder) => void;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
   onMovieStatusChange?: (showtimeId: string, status: MovieStatus) => void;
   onStatusChange?: (showtimeId: string, status: ShowtimeStatus) => void;
 }
@@ -41,9 +45,17 @@ export function ShowtimesTable({
   sortField,
   sortOrder,
   onSortChange,
+  page,
+  pageSize,
+  total,
+  onPageChange,
   onMovieStatusChange,
   onStatusChange,
 }: ShowtimesTableProps) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = Math.min(page * pageSize, total);
+
   // Search, filtering and sorting happen on the server. This component only
   // reports the chosen search and sort upward and renders the page it is given.
   const handleSort = (field: SortField) => {
@@ -243,6 +255,31 @@ export function ShowtimesTable({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-400">
+        <span>
+          Showing {firstRow}–{lastRow} of {total}
+        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => onPageChange(page - 1)}
+            disabled={page <= 1 || isLoading}
+            className="rounded-lg border border-gray-600 px-3 py-1 text-gray-300 transition hover:bg-gray-800 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span>
+            Page {page} of {pageCount}
+          </span>
+          <button
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= pageCount || isLoading}
+            className="rounded-lg border border-gray-600 px-3 py-1 text-gray-300 transition hover:bg-gray-800 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -73,6 +73,7 @@ export default function Home() {
   const [sortField, setSortField] = useState<SortField>("startTime");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
 
+  const [page, setPage] = useState(1);
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -126,6 +127,11 @@ export default function Home() {
 
   useEffect(loadFilterOptions, [loadFilterOptions]);
 
+  // Any change to what is being listed starts again from the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [theaterParam, debouncedSearch, filters, sortField, sortOrder]);
+
   const loadShowtimes = useCallback(async () => {
     if (!userId) {
       setShowtimes([]);
@@ -149,7 +155,7 @@ export default function Home() {
         endDate: filters.endDate,
         sort: sortParam[sortField],
         order: sortOrder,
-        page: 1,
+        page,
         pageSize: PAGE_SIZE,
       });
       if (requestId !== latestRequest.current) return; // a newer request won
@@ -163,7 +169,7 @@ export default function Home() {
     } finally {
       if (requestId === latestRequest.current) setIsLoading(false);
     }
-  }, [userId, theaterParam, debouncedSearch, filters, sortField, sortOrder]);
+  }, [userId, theaterParam, debouncedSearch, filters, sortField, sortOrder, page]);
 
   useEffect(() => {
     void loadShowtimes();
@@ -386,6 +392,10 @@ export default function Home() {
                 sortField={sortField}
                 sortOrder={sortOrder}
                 onSortChange={handleSortChange}
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={setPage}
                 onMovieStatusChange={
                   isAdmin ? handleMovieStatusChange : undefined
                 }

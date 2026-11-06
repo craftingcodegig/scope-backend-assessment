@@ -2,6 +2,13 @@ export type UserRole = "admin" | "viewer";
 export type ShowtimeStatus = "active" | "inactive" | "archived";
 export type MovieStatus = "approved" | "draft" | "flagged" | "needs-review";
 
+export const movieStatusOptions: MovieStatus[] = [
+  "approved",
+  "draft",
+  "flagged",
+  "needs-review",
+];
+
 export interface Theater {
   id: string;
   name: string;

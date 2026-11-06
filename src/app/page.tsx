@@ -1,17 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assessmentData } from "~/data/assessment-data";
 import { api } from "~/lib/api";
 import { useDebounce } from "~/lib/hooks/useDebounce";
 import { useMockSession } from "~/lib/mock-session";
-import type {
-  FilterOptions,
-  MovieStatus,
-  PreviewChanges,
-  Showtime,
-  ShowtimeStatus,
-  Theater,
+import {
+  movieStatusOptions,
+  type FilterOptions,
+  type MovieStatus,
+  type PreviewChanges,
+  type Showtime,
+  type ShowtimeStatus,
+  type Theater,
 } from "~/types/assessment";
 import { FileUpload } from "./_components/FileUpload";
 import { FilterBar } from "./_components/FilterBar";
@@ -411,7 +411,7 @@ export default function Home() {
                 showTheaterColumn={selectedTheaterId === "all"}
                 isAdmin={!!isAdmin}
                 isLoading={isLoading}
-                movieStatusOptions={assessmentData.movieStatusOptions}
+                movieStatusOptions={movieStatusOptions}
                 statusOptions={statusOptions}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}

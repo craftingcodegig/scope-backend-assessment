@@ -7,6 +7,7 @@ import io
 from dataclasses import dataclass
 from datetime import datetime
 
+from .models import Showtime
 from .normalize import clean_text, normalize_title
 
 REQUIRED_COLUMNS = (
@@ -90,3 +91,81 @@ def parse_csv(content: str, theater_name: str) -> list[CsvRow]:
         rows[row.key] = row
 
     return list(rows.values())
+
+
+# Columns a partner drop is allowed to change on an existing showtime,
+# mapped to the camelCase names the UI shows in the preview.
+UPDATABLE_FIELDS = {
+    "movie_title": "movieTitle",
+    "auditorium": "auditorium",
+    "end_time": "endTime",
+    "language": "language",
+    "format": "format",
+    "rating": "rating",
+}
+
+
+@dataclass(frozen=True)
+class FieldDiff:
+    field: str
+    old_value: str
+    new_value: str
+
+
+@dataclass
+class ScheduleDiff:
+    adds: list[CsvRow]
+    updates: list[tuple[Showtime, CsvRow, list[FieldDiff]]]
+    archives: list[Showtime]
+
+
+def _as_text(value: object) -> str:
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
+def _pick_match(candidates: list[Showtime]) -> Showtime:
+    # Prefer the active row; otherwise the most recently touched one.
+    active = [row for row in candidates if row.status == "active"]
+    pool = active or candidates
+    return max(pool, key=lambda row: row.last_updated)
+
+
+def diff_schedule(existing: list[Showtime], rows: list[CsvRow]) -> ScheduleDiff:
+    """Compare the current schedule of one theater with a cleaned CSV drop.
+
+    - A row whose key (normalized title + start time) is unknown is an add.
+    - A row matching an existing showtime is an update when any updatable
+      field differs or the showtime is not active (it gets re-activated).
+    - Active showtimes missing from the drop are archived.
+    """
+    by_key: dict[tuple[str, datetime], list[Showtime]] = {}
+    for showtime in existing:
+        by_key.setdefault((showtime.normalized_title, showtime.start_time), []).append(showtime)
+
+    diff = ScheduleDiff(adds=[], updates=[], archives=[])
+    seen: set[tuple[str, datetime]] = set()
+
+    for row in rows:
+        seen.add(row.key)
+        candidates = by_key.get(row.key)
+        if not candidates:
+            diff.adds.append(row)
+            continue
+
+        showtime = _pick_match(candidates)
+        changes = [
+            FieldDiff(label, _as_text(getattr(showtime, field)), _as_text(getattr(row, field)))
+            for field, label in UPDATABLE_FIELDS.items()
+            if getattr(showtime, field) != getattr(row, field)
+        ]
+        if showtime.status != "active":
+            changes.append(FieldDiff("status", showtime.status, "active"))
+        if changes:
+            diff.updates.append((showtime, row, changes))
+
+    for key, candidates in by_key.items():
+        if key not in seen:
+            diff.archives.extend(row for row in candidates if row.status == "active")
+
+    diff.archives.sort(key=lambda row: row.start_time)
+    return diff

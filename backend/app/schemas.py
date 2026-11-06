@@ -49,3 +49,11 @@ class ShowtimePage(ApiModel):
     total: int
     page: int
     page_size: int
+
+
+class FilterOptions(ApiModel):
+    formats: list[str]
+    languages: list[str]
+    ratings: list[str]
+    auditoriums: list[str]
+    movie_statuses: list[str]

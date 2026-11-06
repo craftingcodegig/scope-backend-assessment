@@ -11,7 +11,7 @@ from ..auth import CurrentUser
 from ..db import get_db
 from ..models import Showtime, Theater
 from ..normalize import normalize_title
-from ..schemas import ShowtimeOut, ShowtimePage
+from ..schemas import FilterOptions, ShowtimeOut, ShowtimePage
 
 router = APIRouter(prefix="/showtimes", tags=["showtimes"])
 
@@ -36,6 +36,36 @@ def _utc_midnight(day: date) -> datetime:
     return datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
 
 
+def _allowed_theaters(user, theater_id: str | None) -> set[str]:
+    allowed = set(user.theater_ids)
+    if theater_id is not None:
+        if theater_id not in allowed:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Theater not accessible")
+        allowed = {theater_id}
+    return allowed
+
+
+@router.get("/filter-options", response_model=FilterOptions)
+def filter_options(
+    db: DbSession, user: CurrentUser, theater_id: str | None = None
+) -> FilterOptions:
+    """Distinct values for the dropdown filters within the user's scope."""
+    allowed = _allowed_theaters(user, theater_id)
+
+    def distinct(column) -> list[str]:
+        return db.scalars(
+            select(column).where(Showtime.theater_id.in_(allowed)).distinct().order_by(column)
+        ).all()
+
+    return FilterOptions(
+        formats=distinct(Showtime.format),
+        languages=distinct(Showtime.language),
+        ratings=distinct(Showtime.rating),
+        auditoriums=distinct(Showtime.auditorium),
+        movie_statuses=distinct(Showtime.movie_status),
+    )
+
+
 @router.get("", response_model=ShowtimePage)
 def list_showtimes(
     db: DbSession,
@@ -57,11 +87,7 @@ def list_showtimes(
 ) -> ShowtimePage:
     # Users only ever see theaters they belong to; a user with no theaters
     # gets an empty page rather than an error.
-    allowed = set(user.theater_ids)
-    if theater_id is not None:
-        if theater_id not in allowed:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Theater not accessible")
-        allowed = {theater_id}
+    allowed = _allowed_theaters(user, theater_id)
 
     query = select(Showtime).where(Showtime.theater_id.in_(allowed))
 

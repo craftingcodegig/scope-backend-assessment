@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -117,3 +117,16 @@ def apply_schedule(
     return ApplyResult(
         added=len(diff.adds), updated=len(diff.updates), archived=len(diff.archives)
     )
+
+
+@router.post("/archive-all", response_model=ApplyResult)
+def archive_all(theater_id: str, db: DbSession, user: AdminUser) -> ApplyResult:
+    """Clear a theater's schedule by archiving every active showtime."""
+    theater = _theater_for_admin(db, user, theater_id)
+    result = db.execute(
+        update(Showtime)
+        .where(Showtime.theater_id == theater.id, Showtime.status == "active")
+        .values(status="archived", last_updated=datetime.now(timezone.utc))
+    )
+    db.commit()
+    return ApplyResult(added=0, updated=0, archived=result.rowcount)

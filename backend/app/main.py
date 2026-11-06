@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .models import create_schema
-from .routers import showtimes, users
+from .routers import schedule, showtimes, users
 
 
 class HealthResponse(BaseModel):
@@ -45,3 +45,4 @@ def health() -> HealthResponse:
 
 app.include_router(users.router)
 app.include_router(showtimes.router)
+app.include_router(schedule.router)

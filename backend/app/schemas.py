@@ -67,3 +67,40 @@ ShowtimeStatus = Literal["active", "inactive", "archived"]
 class ShowtimeUpdate(ApiModel):
     movie_status: MovieStatus | None = None
     status: ShowtimeStatus | None = None
+
+
+class PreviewAdd(ApiModel):
+    movie_title: str
+    auditorium: str
+    start_time: datetime
+    end_time: datetime
+    language: str
+    format: str
+    rating: str
+
+
+class PreviewFieldDiff(ApiModel):
+    field: str
+    old_value: str
+    new_value: str
+
+
+class PreviewUpdate(ApiModel):
+    id: str
+    movie_title: str
+    start_time: datetime
+    end_time: datetime
+    diffs: list[PreviewFieldDiff]
+
+
+class PreviewArchive(ApiModel):
+    id: str
+    movie_title: str
+    start_time: datetime
+    end_time: datetime
+
+
+class PreviewChanges(ApiModel):
+    adds: list[PreviewAdd]
+    updates: list[PreviewUpdate]
+    archives: list[PreviewArchive]

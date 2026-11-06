@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-Status = Literal["active", "inactive", "archived"]
+from . import models  # noqa: F401  (registers tables on Base.metadata)
+from .db import Base, engine
 
 
 class HealthResponse(BaseModel):
@@ -14,18 +15,20 @@ class HealthResponse(BaseModel):
     timestamp: datetime
 
 
-class ShowtimeStatusUpdate(BaseModel):
-    showtime_id: str = Field(..., min_length=1)
-    status: Status
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
 
 
 app = FastAPI(
     title="Scope Backend Assessment API",
     version="0.1.0",
-    description="Minimal FastAPI scaffold for the backend assessment.",
+    description="Showtime schedule API for the backend assessment.",
+    lifespan=lifespan,
 )
 
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(timestamp=datetime.utcnow())
+    return HealthResponse(timestamp=datetime.now(timezone.utc))

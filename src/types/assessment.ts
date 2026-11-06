@@ -68,3 +68,24 @@ export interface PreviewChanges {
   updates: ShowtimeUpdate[];
   archives: ShowtimeArchive[];
 }
+
+export interface ShowtimePage {
+  items: Showtime[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface FilterOptions {
+  formats: string[];
+  languages: string[];
+  ratings: string[];
+  auditoriums: string[];
+  movieStatuses: string[];
+}
+
+export interface ApplyResult {
+  added: number;
+  updated: number;
+  archived: number;
+}

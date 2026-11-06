@@ -104,3 +104,9 @@ class PreviewChanges(ApiModel):
     adds: list[PreviewAdd]
     updates: list[PreviewUpdate]
     archives: list[PreviewArchive]
+
+
+class ApplyResult(ApiModel):
+    added: int
+    updated: int
+    archived: int

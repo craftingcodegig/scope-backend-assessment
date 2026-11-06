@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import AdminUser
 from ..db import get_db
-from ..ingest import CsvError, ScheduleDiff, diff_schedule, parse_csv
+from ..ingest import UPDATABLE_FIELDS, CsvError, ScheduleDiff, diff_schedule, parse_csv
 from ..models import Showtime, Theater
 from ..schemas import (
+    ApplyResult,
     PreviewAdd,
     PreviewArchive,
     PreviewChanges,
@@ -67,3 +70,50 @@ def preview_schedule(
     """Show what a partner CSV would change without touching the database."""
     theater = _theater_for_admin(db, user, theater_id)
     return _to_preview(_compute_diff(db, theater, file))
+
+
+@router.post("/apply", response_model=ApplyResult)
+def apply_schedule(
+    theater_id: str, file: UploadFile, db: DbSession, user: AdminUser
+) -> ApplyResult:
+    """Apply a partner CSV in one transaction: insert, update and archive."""
+    theater = _theater_for_admin(db, user, theater_id)
+    diff = _compute_diff(db, theater, file)
+    now = datetime.now(timezone.utc)
+
+    for row in diff.adds:
+        db.add(
+            Showtime(
+                theater_id=theater.id,
+                movie_title=row.movie_title,
+                normalized_title=row.normalized_title,
+                movie_status="draft",
+                auditorium=row.auditorium,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                language=row.language,
+                format=row.format,
+                rating=row.rating,
+                status="active",
+                last_updated=now,
+            )
+        )
+    for showtime, row, _ in diff.updates:
+        for field in UPDATABLE_FIELDS:
+            setattr(showtime, field, getattr(row, field))
+        showtime.normalized_title = row.normalized_title
+        showtime.status = "active"
+        showtime.last_updated = now
+    for showtime in diff.archives:
+        showtime.status = "archived"
+        showtime.last_updated = now
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Upload conflicts with an active showtime")
+
+    return ApplyResult(
+        added=len(diff.adds), updated=len(diff.updates), archived=len(diff.archives)
+    )

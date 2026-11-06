@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -9,13 +9,27 @@ from sqlalchemy.orm import Session
 
 from ..auth import CurrentUser
 from ..db import get_db
-from ..models import Showtime
+from ..models import Showtime, Theater
 from ..normalize import normalize_title
 from ..schemas import ShowtimeOut, ShowtimePage
 
 router = APIRouter(prefix="/showtimes", tags=["showtimes"])
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+SortField = Literal[
+    "start_time", "end_time", "last_updated", "movie_title", "movie_status", "theater_name"
+]
+
+SORT_COLUMNS = {
+    "start_time": Showtime.start_time,
+    "end_time": Showtime.end_time,
+    "last_updated": Showtime.last_updated,
+    "movie_title": Showtime.normalized_title,
+    "movie_status": Showtime.movie_status,
+    "theater_name": Theater.name,
+}
 
 
 def _utc_midnight(day: date) -> datetime:
@@ -36,6 +50,8 @@ def list_showtimes(
     auditorium: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    sort: SortField = "start_time",
+    order: Literal["asc", "desc"] = "asc",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> ShowtimePage:
@@ -73,8 +89,13 @@ def list_showtimes(
         query = query.where(Showtime.start_time < _utc_midnight(end_date + timedelta(days=1)))
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+    if sort == "theater_name":
+        query = query.join(Theater, Theater.id == Showtime.theater_id)
+    sort_column = SORT_COLUMNS[sort]
+    ordering = sort_column.desc() if order == "desc" else sort_column.asc()
     rows = db.scalars(
-        query.order_by(Showtime.start_time, Showtime.id)
+        query.order_by(ordering, Showtime.id)  # id breaks ties for stable paging
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()

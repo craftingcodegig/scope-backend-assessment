@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -25,3 +27,25 @@ class UserOut(ApiModel):
     email: str
     role: str
     theater_ids: list[str]
+
+
+class ShowtimeOut(ApiModel):
+    id: str
+    theater_id: str
+    movie_title: str
+    movie_status: str
+    auditorium: str
+    start_time: datetime
+    end_time: datetime
+    language: str
+    format: str
+    rating: str
+    status: str
+    last_updated: datetime
+
+
+class ShowtimePage(ApiModel):
+    items: list[ShowtimeOut]
+    total: int
+    page: int
+    page_size: int

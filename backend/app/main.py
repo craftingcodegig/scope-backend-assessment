@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from . import models  # noqa: F401  (registers tables on Base.metadata)
 from .db import Base, engine
-from .routers import users
+from .routers import showtimes, users
 
 
 class HealthResponse(BaseModel):
@@ -45,3 +45,4 @@ def health() -> HealthResponse:
 
 
 app.include_router(users.router)
+app.include_router(showtimes.router)

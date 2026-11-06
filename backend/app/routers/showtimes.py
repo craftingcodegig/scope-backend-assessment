@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import CurrentUser
 from ..db import get_db
 from ..models import Showtime
+from ..normalize import normalize_title
 from ..schemas import ShowtimeOut, ShowtimePage
 
 router = APIRouter(prefix="/showtimes", tags=["showtimes"])
@@ -21,6 +22,7 @@ def list_showtimes(
     db: DbSession,
     user: CurrentUser,
     theater_id: str | None = None,
+    q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> ShowtimePage:
@@ -33,6 +35,11 @@ def list_showtimes(
         allowed = {theater_id}
 
     query = select(Showtime).where(Showtime.theater_id.in_(allowed))
+
+    # Search runs against the normalized title so "spider man" finds
+    # "Spider‑Man: Homecoming" and the trigram index can be used.
+    if q and (needle := normalize_title(q)):
+        query = query.where(Showtime.normalized_title.ilike(f"%{needle}%"))
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(

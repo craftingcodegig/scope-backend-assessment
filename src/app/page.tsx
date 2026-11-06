@@ -65,6 +65,8 @@ export default function Home() {
   const [selectedTheaterId, setSelectedTheaterId] = useState<string>("all");
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewChanges>(emptyPreview);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
 
   const [filters, setFilters] = useState(emptyFilters);
   const [filterOptions, setFilterOptions] =
@@ -176,20 +178,35 @@ export default function Home() {
     void loadShowtimes();
   }, [loadShowtimes]);
 
-  const previewForTheater = useMemo(() => {
-    if (selectedTheaterId === "all") return emptyPreview;
-    return (
-      assessmentData.previewChangesByTheater[selectedTheaterId] ?? emptyPreview
-    );
-  }, [selectedTheaterId]);
-
-  const handleFileSelect = (_content: string) => {
-    setPreviewData(previewForTheater);
-    setIsPreviewOpen(true);
+  // Upload is two steps: preview what the CSV would change, then apply the
+  // same file once the admin confirms. Nothing is written until apply.
+  const handleFileSelect = async (file: File) => {
+    if (!userId || selectedTheaterId === "all") return;
+    setError(null);
+    try {
+      const preview = await api.previewSchedule(userId, selectedTheaterId, file);
+      setPendingFile(file);
+      setPreviewData(preview);
+      setIsPreviewOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to preview CSV");
+    }
   };
 
-  const handleConfirmChanges = () => {
-    setIsPreviewOpen(false);
+  const handleConfirmChanges = async () => {
+    if (!userId || !pendingFile || selectedTheaterId === "all") return;
+    setIsApplying(true);
+    try {
+      await api.applySchedule(userId, selectedTheaterId, pendingFile);
+      setIsPreviewOpen(false);
+      setPendingFile(null);
+      await loadShowtimes();
+      loadFilterOptions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply CSV");
+    } finally {
+      setIsApplying(false);
+    }
   };
 
   const handleClearSchedule = async () => {
@@ -321,7 +338,7 @@ export default function Home() {
           </div>
 
           <FileUpload
-            onFileSelect={handleFileSelect}
+            onFileSelect={(file) => void handleFileSelect(file)}
             disabled={
               !isAdmin ||
               selectedTheaterId === "all" ||
@@ -424,10 +441,13 @@ export default function Home() {
 
         <PreviewModal
           isOpen={isPreviewOpen}
-          onClose={() => setIsPreviewOpen(false)}
-          onConfirm={handleConfirmChanges}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setPendingFile(null);
+          }}
+          onConfirm={() => void handleConfirmChanges()}
           changes={previewData}
-          isApplying={false}
+          isApplying={isApplying}
         />
       </div>
     </main>

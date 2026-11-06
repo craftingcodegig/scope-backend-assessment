@@ -3,21 +3,19 @@
 import { useRef } from "react";
 
 interface FileUploadProps {
-  onFileSelect: (content: string) => void;
+  onFileSelect: (file: File) => void;
   disabled?: boolean;
 }
 
 export function FileUpload({ onFileSelect, disabled }: FileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const content = await file.text();
-    onFileSelect(content);
+    // The file itself is handed up so it can be posted to the API as-is.
+    onFileSelect(file);
 
     // Reset input so the same file can be selected again
     if (fileInputRef.current) {

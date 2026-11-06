@@ -1,25 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { useDebounce } from "~/lib/hooks/useDebounce";
 import type { MovieStatus, Showtime, ShowtimeStatus, Theater } from "~/types/assessment";
 
-type SortField =
+export type SortField =
   | "movieTitle"
   | "startTime"
   | "endTime"
   | "lastUpdated"
   | "theaterName"
   | "movieStatus";
-type SortOrder = "asc" | "desc";
+export type SortOrder = "asc" | "desc";
 
 interface ShowtimesTableProps {
   showtimes: Showtime[];
   theatersById: Record<string, Theater>;
   showTheaterColumn: boolean;
   isAdmin: boolean;
+  isLoading: boolean;
   movieStatusOptions: MovieStatus[];
   statusOptions: readonly ShowtimeStatus[];
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  sortField: SortField;
+  sortOrder: SortOrder;
+  onSortChange: (field: SortField, order: SortOrder) => void;
   onMovieStatusChange?: (showtimeId: string, status: MovieStatus) => void;
   onStatusChange?: (showtimeId: string, status: ShowtimeStatus) => void;
 }
@@ -29,63 +33,26 @@ export function ShowtimesTable({
   theatersById,
   showTheaterColumn,
   isAdmin,
+  isLoading,
   movieStatusOptions,
   statusOptions,
+  searchQuery,
+  onSearchChange,
+  sortField,
+  sortOrder,
+  onSortChange,
   onMovieStatusChange,
   onStatusChange,
 }: ShowtimesTableProps) {
-  const [sortField, setSortField] = useState<SortField>("startTime");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const debouncedSearchQuery = useDebounce(searchQuery, 300);
-
+  // Search, filtering and sorting happen on the server. This component only
+  // reports the chosen search and sort upward and renders the page it is given.
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+      onSortChange(field, sortOrder === "asc" ? "desc" : "asc");
     } else {
-      setSortField(field);
-      setSortOrder("asc");
+      onSortChange(field, "asc");
     }
   };
-
-  const filteredShowtimes = showtimes.filter((st) =>
-    st.movieTitle.toLowerCase().includes(debouncedSearchQuery.toLowerCase()),
-  );
-
-  const getSortValue = (showtime: Showtime) => {
-    switch (sortField) {
-      case "theaterName":
-        return theatersById[showtime.theaterId]?.name ?? "";
-      case "movieStatus":
-        return showtime.movieStatus;
-      case "movieTitle":
-        return showtime.movieTitle;
-      case "startTime":
-        return new Date(showtime.startTime).getTime();
-      case "endTime":
-        return new Date(showtime.endTime).getTime();
-      case "lastUpdated":
-        return new Date(showtime.lastUpdated).getTime();
-      default:
-        return "";
-    }
-  };
-
-  const sortedShowtimes = [...filteredShowtimes].sort((a, b) => {
-    const aVal = getSortValue(a);
-    const bVal = getSortValue(b);
-
-    if (typeof aVal === "number" && typeof bVal === "number") {
-      return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
-    }
-
-    const aStr = String(aVal);
-    const bStr = String(bVal);
-    return sortOrder === "asc"
-      ? aStr.localeCompare(bStr)
-      : bStr.localeCompare(aStr);
-  });
 
   const formatDateTime = (date: string) => {
     return new Date(date).toLocaleString("en-US", {
@@ -110,12 +77,16 @@ export function ShowtimesTable({
           type="text"
           placeholder="Search by movie title..."
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => onSearchChange(e.target.value)}
           className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-400 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
         />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-700">
+      <div
+        className={`overflow-x-auto rounded-lg border border-gray-700 transition-opacity ${
+          isLoading ? "opacity-60" : ""
+        }`}
+      >
         <table className="w-full text-left text-sm">
           <thead className="bg-gray-800 text-xs uppercase text-gray-400">
             <tr>
@@ -165,17 +136,17 @@ export function ShowtimesTable({
             </tr>
           </thead>
           <tbody>
-            {sortedShowtimes.length === 0 ? (
+            {showtimes.length === 0 ? (
               <tr>
                 <td
                   colSpan={columnCount}
                   className="px-4 py-8 text-center text-gray-400"
                 >
-                  No showtimes found
+                  {isLoading ? "Loading showtimes..." : "No showtimes found"}
                 </td>
               </tr>
             ) : (
-              sortedShowtimes.map((showtime) => (
+              showtimes.map((showtime) => (
                 <tr
                   key={showtime.id}
                   className={`border-b border-gray-700 hover:bg-gray-800 ${

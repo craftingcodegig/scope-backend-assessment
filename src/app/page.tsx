@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assessmentData } from "~/data/assessment-data";
 import { api } from "~/lib/api";
+import { useDebounce } from "~/lib/hooks/useDebounce";
 import { useMockSession } from "~/lib/mock-session";
-import type { MovieStatus, PreviewChanges, Showtime, Theater } from "~/types/assessment";
+import type {
+  FilterOptions,
+  MovieStatus,
+  PreviewChanges,
+  Showtime,
+  Theater,
+} from "~/types/assessment";
 import { FileUpload } from "./_components/FileUpload";
 import { FilterBar } from "./_components/FilterBar";
 import { PreviewModal } from "./_components/PreviewModal";
-import { ShowtimesTable } from "./_components/ShowtimesTable";
+import {
+  ShowtimesTable,
+  type SortField,
+  type SortOrder,
+} from "./_components/ShowtimesTable";
 
 const emptyPreview: PreviewChanges = {
   adds: [],
@@ -16,29 +27,60 @@ const emptyPreview: PreviewChanges = {
   archives: [],
 };
 
-const uniqueSorted = (values: string[]) =>
-  [...new Set(values.filter(Boolean))].sort();
+const emptyFilters = {
+  status: "all" as "active" | "inactive" | "archived" | "all",
+  format: "",
+  language: "",
+  rating: "",
+  auditorium: "",
+  movieStatus: "",
+  startDate: "",
+  endDate: "",
+};
+
+const emptyFilterOptions: FilterOptions = {
+  formats: [],
+  languages: [],
+  ratings: [],
+  auditoriums: [],
+  movieStatuses: [],
+};
+
+// Table sort fields mapped to the API sort parameter names.
+const sortParam: Record<SortField, string> = {
+  movieTitle: "movie_title",
+  startTime: "start_time",
+  endTime: "end_time",
+  lastUpdated: "last_updated",
+  theaterName: "theater_name",
+  movieStatus: "movie_status",
+};
+
+const PAGE_SIZE = 50;
 
 export default function Home() {
   const { users, user, userId, setUserId, signOut } = useMockSession();
   const [accessibleTheaters, setAccessibleTheaters] = useState<Theater[]>([]);
-  const [showtimes, setShowtimes] = useState<Showtime[]>(assessmentData.showtimes);
   const [selectedTheaterId, setSelectedTheaterId] = useState<string>("all");
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewChanges>(emptyPreview);
 
-  const [filters, setFilters] = useState({
-    status: "all" as "active" | "inactive" | "archived" | "all",
-    format: "",
-    language: "",
-    rating: "",
-    auditorium: "",
-    movieStatus: "",
-    startDate: "",
-    endDate: "",
-  });
+  const [filters, setFilters] = useState(emptyFilters);
+  const [filterOptions, setFilterOptions] =
+    useState<FilterOptions>(emptyFilterOptions);
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const [sortField, setSortField] = useState<SortField>("startTime");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+
+  const [showtimes, setShowtimes] = useState<Showtime[]>([]);
+  const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
   const isAdmin = user?.role === "admin";
+  const theaterParam = selectedTheaterId === "all" ? undefined : selectedTheaterId;
 
   // The backend only returns theaters the user belongs to.
   useEffect(() => {
@@ -62,91 +104,70 @@ export default function Home() {
     );
   }, [accessibleTheaters]);
 
-  const accessibleTheaterIds = useMemo(
-    () => new Set(accessibleTheaters.map((theater) => theater.id)),
-    [accessibleTheaters],
-  );
-
   useEffect(() => {
-    if (!user) return;
     if (
       selectedTheaterId !== "all" &&
-      !user.theaterIds.includes(selectedTheaterId)
+      !accessibleTheaters.some((theater) => theater.id === selectedTheaterId)
     ) {
       setSelectedTheaterId("all");
     }
-  }, [selectedTheaterId, user]);
+  }, [accessibleTheaters, selectedTheaterId]);
 
-  const showtimesForUser = useMemo(() => {
-    if (!user) return [];
-    return showtimes.filter((showtime) =>
-      accessibleTheaterIds.has(showtime.theaterId),
-    );
-  }, [accessibleTheaterIds, showtimes, user]);
+  const loadFilterOptions = useCallback(() => {
+    if (!userId) {
+      setFilterOptions(emptyFilterOptions);
+      return;
+    }
+    api
+      .filterOptions(userId, theaterParam)
+      .then(setFilterOptions)
+      .catch(() => setFilterOptions(emptyFilterOptions));
+  }, [userId, theaterParam]);
 
-  const scopedShowtimes = useMemo(() => {
-    if (selectedTheaterId === "all") return showtimesForUser;
-    return showtimesForUser.filter(
-      (showtime) => showtime.theaterId === selectedTheaterId,
-    );
-  }, [selectedTheaterId, showtimesForUser]);
+  useEffect(loadFilterOptions, [loadFilterOptions]);
 
-  const filteredShowtimes = useMemo(() => {
-    let result = scopedShowtimes;
-
-    if (filters.status !== "all") {
-      result = result.filter((showtime) => showtime.status === filters.status);
+  const loadShowtimes = useCallback(async () => {
+    if (!userId) {
+      setShowtimes([]);
+      setTotal(0);
+      return;
     }
-    if (filters.format) {
-      result = result.filter((showtime) => showtime.format === filters.format);
-    }
-    if (filters.language) {
-      result = result.filter(
-        (showtime) => showtime.language === filters.language,
-      );
-    }
-    if (filters.rating) {
-      result = result.filter((showtime) => showtime.rating === filters.rating);
-    }
-    if (filters.auditorium) {
-      result = result.filter(
-        (showtime) => showtime.auditorium === filters.auditorium,
-      );
-    }
-    if (filters.movieStatus) {
-      result = result.filter(
-        (showtime) => showtime.movieStatus === filters.movieStatus,
-      );
-    }
-    if (filters.startDate || filters.endDate) {
-      const startDate = filters.startDate
-        ? new Date(filters.startDate)
-        : null;
-      const endDate = filters.endDate ? new Date(filters.endDate) : null;
-      if (endDate) {
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      result = result.filter((showtime) => {
-        const showtimeDate = new Date(showtime.startTime);
-        if (startDate && showtimeDate < startDate) return false;
-        if (endDate && showtimeDate > endDate) return false;
-        return true;
+    const requestId = ++latestRequest.current;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await api.listShowtimes(userId, {
+        theaterId: theaterParam,
+        q: debouncedSearch,
+        status: filters.status === "all" ? undefined : filters.status,
+        movieStatus: filters.movieStatus,
+        format: filters.format,
+        language: filters.language,
+        rating: filters.rating,
+        auditorium: filters.auditorium,
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        sort: sortParam[sortField],
+        order: sortOrder,
+        page: 1,
+        pageSize: PAGE_SIZE,
       });
+      if (requestId !== latestRequest.current) return; // a newer request won
+      setShowtimes(result.items);
+      setTotal(result.total);
+    } catch (err) {
+      if (requestId !== latestRequest.current) return;
+      setError(err instanceof Error ? err.message : "Failed to load showtimes");
+      setShowtimes([]);
+      setTotal(0);
+    } finally {
+      if (requestId === latestRequest.current) setIsLoading(false);
     }
+  }, [userId, theaterParam, debouncedSearch, filters, sortField, sortOrder]);
 
-    return result;
-  }, [filters, scopedShowtimes]);
-
-  const filterOptions = useMemo(() => {
-    return {
-      formats: uniqueSorted(scopedShowtimes.map((st) => st.format)),
-      languages: uniqueSorted(scopedShowtimes.map((st) => st.language)),
-      ratings: uniqueSorted(scopedShowtimes.map((st) => st.rating)),
-      auditoriums: uniqueSorted(scopedShowtimes.map((st) => st.auditorium)),
-      movieStatuses: uniqueSorted(scopedShowtimes.map((st) => st.movieStatus)),
-    };
-  }, [scopedShowtimes]);
+  useEffect(() => {
+    void loadShowtimes();
+  }, [loadShowtimes]);
 
   const previewForTheater = useMemo(() => {
     if (selectedTheaterId === "all") return emptyPreview;
@@ -194,9 +215,10 @@ export default function Home() {
     );
   };
 
-  const activeCount = filteredShowtimes.filter(
-    (showtime) => showtime.status === "active",
-  ).length;
+  const handleSortChange = (field: SortField, order: SortOrder) => {
+    setSortField(field);
+    setSortOrder(order);
+  };
 
   const statusOptions = ["active", "inactive", "archived"] as const;
 
@@ -305,9 +327,9 @@ export default function Home() {
           </button>
 
           <div className="ml-auto text-sm text-gray-400">
-            {filteredShowtimes.length > 0 && (
+            {total > 0 && (
               <>
-                {activeCount} active showtimes
+                {total} showtimes
                 {selectedTheaterId === "all" ? " across theaters" : ""}
               </>
             )}
@@ -318,6 +340,12 @@ export default function Home() {
           <div className="mb-6 rounded-lg border border-gray-700 bg-gray-900 p-4 text-sm text-gray-400">
             You are in read-only mode. Admin users can upload CSVs and update
             movie status.
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-6 rounded-lg border border-red-800 bg-red-950 p-4 text-sm text-red-300">
+            {error}
           </div>
         )}
 
@@ -346,12 +374,18 @@ export default function Home() {
 
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
               <ShowtimesTable
-                showtimes={filteredShowtimes}
+                showtimes={showtimes}
                 theatersById={theatersById}
                 showTheaterColumn={selectedTheaterId === "all"}
                 isAdmin={!!isAdmin}
+                isLoading={isLoading}
                 movieStatusOptions={assessmentData.movieStatusOptions}
                 statusOptions={statusOptions}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                sortField={sortField}
+                sortOrder={sortOrder}
+                onSortChange={handleSortChange}
                 onMovieStatusChange={
                   isAdmin ? handleMovieStatusChange : undefined
                 }

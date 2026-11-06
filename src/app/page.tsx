@@ -10,6 +10,7 @@ import type {
   MovieStatus,
   PreviewChanges,
   Showtime,
+  ShowtimeStatus,
   Theater,
 } from "~/types/assessment";
 import { FileUpload } from "./_components/FileUpload";
@@ -191,34 +192,42 @@ export default function Home() {
     setIsPreviewOpen(false);
   };
 
-  const handleClearSchedule = () => {
-    if (selectedTheaterId === "all") {
+  const handleClearSchedule = async () => {
+    if (!userId || selectedTheaterId === "all") {
       alert("Select a single theater before clearing the schedule.");
       return;
     }
     if (
-      confirm(
-        "Are you sure you want to archive all showtimes for this theater?",
-      )
+      !confirm("Are you sure you want to archive all showtimes for this theater?")
     ) {
-      setShowtimes((current) =>
-        current.map((showtime) =>
-          showtime.theaterId === selectedTheaterId
-            ? { ...showtime, status: "archived" }
-            : showtime,
-        ),
-      );
+      return;
+    }
+    try {
+      await api.archiveAll(userId, selectedTheaterId);
+      await loadShowtimes();
+      loadFilterOptions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear schedule");
     }
   };
 
-  const handleMovieStatusChange = (showtimeId: string, status: MovieStatus) => {
-    setShowtimes((current) =>
-      current.map((showtime) =>
-        showtime.id === showtimeId
-          ? { ...showtime, movieStatus: status }
-          : showtime,
-      ),
-    );
+  // Admin edits go straight to the API; the row is replaced with the saved
+  // version so last-updated reflects what the server stored.
+  const updateShowtime = async (
+    showtimeId: string,
+    body: { movieStatus?: MovieStatus; status?: ShowtimeStatus },
+  ) => {
+    if (!userId) return;
+    try {
+      const saved = await api.updateShowtime(userId, showtimeId, body);
+      setShowtimes((current) =>
+        current.map((showtime) =>
+          showtime.id === showtimeId ? saved : showtime,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update showtime");
+    }
   };
 
   const handleSortChange = (field: SortField, order: SortOrder) => {
@@ -321,7 +330,7 @@ export default function Home() {
           />
 
           <button
-            onClick={handleClearSchedule}
+            onClick={() => void handleClearSchedule()}
             disabled={
               !isAdmin ||
               selectedTheaterId === "all" ||
@@ -397,19 +406,15 @@ export default function Home() {
                 total={total}
                 onPageChange={setPage}
                 onMovieStatusChange={
-                  isAdmin ? handleMovieStatusChange : undefined
+                  isAdmin
+                    ? (showtimeId, movieStatus) =>
+                        void updateShowtime(showtimeId, { movieStatus })
+                    : undefined
                 }
                 onStatusChange={
                   isAdmin
-                    ? (showtimeId, status) => {
-                        setShowtimes((current) =>
-                          current.map((showtime) =>
-                            showtime.id === showtimeId
-                              ? { ...showtime, status }
-                              : showtime,
-                          ),
-                        );
-                      }
+                    ? (showtimeId, status) =>
+                        void updateShowtime(showtimeId, { status })
                     : undefined
                 }
               />

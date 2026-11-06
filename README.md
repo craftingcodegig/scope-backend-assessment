@@ -1,78 +1,164 @@
 # Theater Showtimes Backend Assessment
 
-This repository contains a frontend-only Next.js application with static JSON data. The backend logic has been intentionally removed so candidates can implement it as part of the assessment. The UI is wired to mock data and stubbed actions to illustrate the expected behaviors.
+A small system for managing theater showtimes: a FastAPI backend on PostgreSQL that
+ingests partner CSV drops and reconciles them against the stored schedule, and a
+Next.js frontend that talks to it.
 
 ## Quick Start
 
-1. Install dependencies
+### 1. Database
 
-```bash
-npm install
-```
-
-2. Create a `.env` file
+Create a PostgreSQL database and put its URL in `.env` (copy from `.env.example`):
 
 ```bash
 cp .env.example .env
 ```
 
-3. Add your database connection string
-
-- `DATABASE_URL`
-
-4. Run the dev server
-
-```bash
-npm run dev
+```
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/scopelabs"
+NEXT_PUBLIC_API_URL="http://localhost:8000"
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Tables, indexes and the `pg_trgm` extension are created automatically when the
+backend starts, so no migration step is needed.
 
-## FastAPI Scaffold
-
-A minimal FastAPI app lives in `backend/app/main.py`.
-
-Run it locally:
+### 2. Backend
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+.venv\Scripts\activate        # or: source .venv/bin/activate
 pip install -r requirements.txt
+python -m app.seed            # loads the sample theaters, users and showtimes
 uvicorn app.main:app --reload --port 8000
 ```
 
-Then visit `http://localhost:8000/health`.
+Interactive API docs are served at `http://localhost:8000/docs`.
 
-## What’s in the Frontend
+### 3. Frontend
 
-- Static data lives in `src/data/assessment-data.ts`.
-- Users are mocked client-side with a selector in the UI (admin vs non-admin).
-- CSV upload, preview, and schedule mutation buttons are intentionally mocked.
+```bash
+npm install
+npm run dev
+```
 
-## Backend Requirements (Implement These)
+Open `http://localhost:3000`, pick a user in the Session box, and the rest of
+the page is driven by the API.
 
-Build the backend for a website to ingest a partner CSV and reconcile it against the current schedule for a single theater that currently has hard coded JSON data.
+### Tests
 
-The backend must support:
+```bash
+cd backend
+python -m pytest
+```
 
-- Admin and non-admin views
-  - Admin has full read/write access
-  - Non-admin has read access to limited data
-  - All users belong to some, none, or all theaters
-  - Users can only see movies for theaters they belong to
-  - Admin can update a movie status field that non-admins cannot update
-- A database schema based on the given hardcoded JSON data
-- Search at scale (hundreds of thousands of movies)
-  - Search by movie name
-  - Reasonable filters for other columns
-  - Sort by reasonable columns
-- CSV data cleaning on upload
-  - At most one active showtime per unique movie + start time per theater
-  - Minor differences (title spelling, auditorium rename) should update the same showtime
-  - Missing showtimes in a new drop should be archived
-  - Schedule must be persisted in the database
+The tests cover title normalization, CSV parsing and the schedule diff, using
+the files in `sample-data/` as fixtures.
 
-## Notes
+## How It Works
 
-- The frontend currently shows a callout indicating mock behavior. Replace mock logic with real API calls once the backend is implemented.
+### Users and access
+
+There is no login screen. The frontend lets you pick a user and sends that id
+on every request as an `X-User-Id` header. The backend resolves the user and
+enforces everything from there:
+
+- Every showtime query is restricted to theaters the user belongs to. A user
+  with no theaters simply gets an empty list.
+- Admins can change a showtime's `status` and `movieStatus`, upload CSVs and
+  clear a schedule. Viewers get `403` on those endpoints regardless of what the
+  UI shows.
+
+Swapping the header for a real session token would only touch `app/auth.py`.
+
+### Data model
+
+Three tables plus a join table, in `backend/app/models.py`:
+
+- `theaters` and `users`, linked through `user_theaters`.
+- `showtimes`, one row per screening, carrying the movie title, auditorium,
+  start/end time, language, format, rating, both status fields and a
+  `last_updated` timestamp.
+
+Movie status is stored on the showtime rather than in a separate movies table
+because the provided data has the same movie at different statuses in different
+screenings. It keeps the schema to one hot table, which is also what makes the
+list endpoint simple to index.
+
+Each showtime also stores a `normalized_title`: the title lower-cased, with
+punctuation and dash variants removed, whitespace collapsed and number words
+turned into digits. "Spider‑Man: Homecoming", "  Spider Man - Homecoming  "
+and "DUNE PART 2" / "Dune: Part Two" all normalize to the same key. This column
+is what matching and searching use; the original spelling is kept for display.
+
+### Search at scale
+
+`GET /showtimes` is paginated and does all searching, filtering and sorting in
+SQL. The relevant indexes:
+
+- A GIN trigram index on `normalized_title` so `ILIKE '%term%'` search stays
+  fast on hundreds of thousands of rows.
+- A composite index on `(theater_id, start_time)` for the default listing.
+- A partial unique index on `(theater_id, normalized_title, start_time)` where
+  `status = 'active'`. This is the "at most one active showtime per movie and
+  start time per theater" rule, enforced by the database rather than by
+  application code.
+
+### CSV reconciliation
+
+Upload is two steps so an admin can see the effect before anything is written:
+
+1. `POST /theaters/{id}/schedule/preview` parses the file and returns the adds,
+   updates (with per-field diffs) and archives it would make.
+2. `POST /theaters/{id}/schedule/apply` takes the same file and applies those
+   changes in one transaction.
+
+Re-parsing on apply keeps the server stateless; there is no preview to store or
+expire. Both steps run through the same code in `app/ingest.py`:
+
+- Every cell is trimmed and internal whitespace is collapsed. Rows naming a
+  different theater are rejected with the line number.
+- Within one file, rows with the same movie and start time collapse to the last
+  one, so a duplicated line never creates a duplicate showtime.
+- A row is matched to an existing showtime by `(normalized title, start time)`.
+  If it matches and any field differs (title spelling, auditorium rename,
+  format change) the existing row is updated in place. If the match was
+  archived earlier, it is reactivated instead of inserted again.
+- Rows with no match are inserted as new active showtimes.
+- Active showtimes for that theater that do not appear in the file are archived.
+
+`POST /theaters/{id}/schedule/archive-all` backs the Clear Schedule button.
+
+## API Overview
+
+| Method | Path | Who | Purpose |
+| --- | --- | --- | --- |
+| GET | `/users` | anyone | Users for the session selector |
+| GET | `/me` | any user | Current user with role and theater ids |
+| GET | `/me/theaters` | any user | Theaters the user belongs to |
+| GET | `/showtimes` | any user | Paginated list with `q`, filters, `sort`, `order`, `page`, `page_size` |
+| GET | `/showtimes/filter-options` | any user | Distinct values for the filter dropdowns |
+| PATCH | `/showtimes/{id}` | admin | Update `status` and/or `movieStatus` |
+| POST | `/theaters/{id}/schedule/preview` | admin | Diff a CSV against the current schedule |
+| POST | `/theaters/{id}/schedule/apply` | admin | Apply a CSV |
+| POST | `/theaters/{id}/schedule/archive-all` | admin | Archive every active showtime |
+
+All responses use camelCase to match the frontend types in
+`src/types/assessment.ts`.
+
+## Project Layout
+
+```
+backend/app/
+  main.py        FastAPI app, CORS, startup schema creation
+  db.py          engine and session
+  models.py      SQLAlchemy models and indexes
+  auth.py        X-User-Id resolution and admin check
+  normalize.py   title normalization
+  ingest.py      CSV parsing and schedule diff
+  seed.py        loads seed_data.json
+  routers/       users, showtimes, schedule endpoints
+backend/tests/   pytest suite
+src/lib/api.ts   typed client used by the page
+sample-data/     example partner drops used by the tests
+```

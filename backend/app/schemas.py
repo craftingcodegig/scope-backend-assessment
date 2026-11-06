@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
@@ -57,3 +58,12 @@ class FilterOptions(ApiModel):
     ratings: list[str]
     auditoriums: list[str]
     movie_statuses: list[str]
+
+
+MovieStatus = Literal["approved", "draft", "flagged", "needs-review"]
+ShowtimeStatus = Literal["active", "inactive", "archived"]
+
+
+class ShowtimeUpdate(ApiModel):
+    movie_status: MovieStatus | None = None
+    status: ShowtimeStatus | None = None

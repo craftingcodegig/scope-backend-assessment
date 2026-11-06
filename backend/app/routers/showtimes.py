@@ -5,13 +5,14 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..auth import CurrentUser
+from ..auth import AdminUser, CurrentUser
 from ..db import get_db
 from ..models import Showtime, Theater
 from ..normalize import normalize_title
-from ..schemas import FilterOptions, ShowtimeOut, ShowtimePage
+from ..schemas import FilterOptions, ShowtimeOut, ShowtimePage, ShowtimeUpdate
 
 router = APIRouter(prefix="/showtimes", tags=["showtimes"])
 
@@ -132,3 +133,30 @@ def list_showtimes(
         page=page,
         page_size=page_size,
     )
+
+
+@router.patch("/{showtime_id}", response_model=ShowtimeOut)
+def update_showtime(
+    showtime_id: str, body: ShowtimeUpdate, db: DbSession, user: AdminUser
+) -> ShowtimeOut:
+    """Admins can change the movie status and the showtime status."""
+    showtime = db.get(Showtime, showtime_id)
+    if showtime is None or showtime.theater_id not in user.theater_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Showtime not found")
+
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
+    for field, value in changes.items():
+        setattr(showtime, field, value)
+    showtime.last_updated = datetime.now(timezone.utc)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Another active showtime exists for this movie and start time",
+        )
+    return ShowtimeOut.model_validate(showtime)

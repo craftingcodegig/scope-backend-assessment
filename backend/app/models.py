@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Table, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .db import Base
+from .db import Base, engine
 
 user_theaters = Table(
     "user_theaters",
@@ -76,3 +76,21 @@ Index(
     unique=True,
     postgresql_where=text("status = 'active'"),
 )
+# Trigram index makes ILIKE '%term%' title search usable at scale.
+Index(
+    "ix_showtimes_title_trgm",
+    Showtime.normalized_title,
+    postgresql_using="gin",
+    postgresql_ops={"normalized_title": "gin_trgm_ops"},
+)
+
+
+def create_schema() -> None:
+    """Create the extension, tables and indexes if they do not exist yet."""
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        Base.metadata.create_all(bind=conn)
+        # create_all skips existing tables, so make sure new indexes land too.
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                index.create(bind=conn, checkfirst=True)

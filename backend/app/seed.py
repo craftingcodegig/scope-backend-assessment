@@ -13,7 +13,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from . import models
-from .db import Base, SessionLocal, engine
+from .models import create_schema
+from .db import SessionLocal
 from .normalize import normalize_title
 
 SEED_FILE = Path(__file__).with_name("seed_data.json")
@@ -64,7 +65,7 @@ def seed(db: Session) -> None:
 
 
 if __name__ == "__main__":
-    Base.metadata.create_all(bind=engine)
+    create_schema()
     with SessionLocal() as session:
         seed(session)
     print("Seed complete.")

@@ -8,8 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import models  # noqa: F401  (registers tables on Base.metadata)
-from .db import Base, engine
+from .models import create_schema
 from .routers import showtimes, users
 
 
@@ -20,7 +19,7 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    create_schema()
     yield
 
 

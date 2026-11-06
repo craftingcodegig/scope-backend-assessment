@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { assessmentData } from "~/data/assessment-data";
+import { api } from "~/lib/api";
 import type { AssessmentUser } from "~/types/assessment";
 
 const STORAGE_KEY = "scope-assessment-user-id";
@@ -11,16 +11,21 @@ const safeGetStoredUserId = () => {
   return window.localStorage.getItem(STORAGE_KEY);
 };
 
-export const defaultUserId = assessmentData.users[0]?.id ?? null;
-
-export function useMockSession(initialUserId: string | null = defaultUserId) {
-  const [userId, setUserId] = useState<string | null>(initialUserId);
+/**
+ * Stand-in for real authentication: the user is picked from a list and the
+ * choice is remembered in localStorage. The backend enforces permissions.
+ */
+export function useMockSession() {
+  const [users, setUsers] = useState<AssessmentUser[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
+    api
+      .listUsers()
+      .then(setUsers)
+      .catch(() => setUsers([]));
     const stored = safeGetStoredUserId();
-    if (stored) {
-      setUserId(stored);
-    }
+    if (stored) setUserId(stored);
   }, []);
 
   useEffect(() => {
@@ -34,10 +39,11 @@ export function useMockSession(initialUserId: string | null = defaultUserId) {
 
   const user: AssessmentUser | null = useMemo(() => {
     if (!userId) return null;
-    return assessmentData.users.find((candidate) => candidate.id === userId) ?? null;
-  }, [userId]);
+    return users.find((candidate) => candidate.id === userId) ?? null;
+  }, [users, userId]);
 
   return {
+    users,
     user,
     userId,
     setUserId,

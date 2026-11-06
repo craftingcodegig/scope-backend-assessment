@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { assessmentData } from "~/data/assessment-data";
+import { api } from "~/lib/api";
 import { useMockSession } from "~/lib/mock-session";
 import type { MovieStatus, PreviewChanges, Showtime, Theater } from "~/types/assessment";
 import { FileUpload } from "./_components/FileUpload";
@@ -19,7 +20,8 @@ const uniqueSorted = (values: string[]) =>
   [...new Set(values.filter(Boolean))].sort();
 
 export default function Home() {
-  const { user, userId, setUserId, signOut } = useMockSession();
+  const { users, user, userId, setUserId, signOut } = useMockSession();
+  const [accessibleTheaters, setAccessibleTheaters] = useState<Theater[]>([]);
   const [showtimes, setShowtimes] = useState<Showtime[]>(assessmentData.showtimes);
   const [selectedTheaterId, setSelectedTheaterId] = useState<string>("all");
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -38,22 +40,27 @@ export default function Home() {
 
   const isAdmin = user?.role === "admin";
 
+  // The backend only returns theaters the user belongs to.
+  useEffect(() => {
+    if (!userId) {
+      setAccessibleTheaters([]);
+      return;
+    }
+    api
+      .myTheaters(userId)
+      .then(setAccessibleTheaters)
+      .catch(() => setAccessibleTheaters([]));
+  }, [userId]);
+
   const theatersById = useMemo(() => {
-    return assessmentData.theaters.reduce(
+    return accessibleTheaters.reduce(
       (acc, theater) => {
         acc[theater.id] = theater;
         return acc;
       },
       {} as Record<string, Theater>,
     );
-  }, []);
-
-  const accessibleTheaters = useMemo(() => {
-    if (!user) return [];
-    return assessmentData.theaters.filter((theater) =>
-      user.theaterIds.includes(theater.id),
-    );
-  }, [user]);
+  }, [accessibleTheaters]);
 
   const accessibleTheaterIds = useMemo(
     () => new Set(accessibleTheaters.map((theater) => theater.id)),
@@ -217,7 +224,7 @@ export default function Home() {
                 <option value="" disabled>
                   Select a user
                 </option>
-                {assessmentData.users.map((candidate) => (
+                {users.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
                     {candidate.name} ({candidate.role})
                   </option>

@@ -164,3 +164,84 @@ def suggest_matches(ai: AiClient, diff: ScheduleDiff) -> list[MatchSuggestion]:
             )
         )
     return suggestions
+
+
+# --- Review summary and warnings -------------------------------------------
+
+MAX_REVIEW_ROWS = 150
+MAX_WARNINGS = 20
+
+
+class RowWarning(BaseModel):
+    movie_title: str
+    start_time: str
+    message: str
+
+
+class ReviewResponse(BaseModel):
+    summary: str
+    warnings: list[RowWarning]
+
+
+def projected_schedule(existing: list[Showtime], diff: ScheduleDiff) -> list[dict]:
+    """The active schedule as it would look after the diff is applied."""
+    archived = {showtime.id for showtime in diff.archives}
+    updated = {showtime.id: row for showtime, row, _ in diff.updates}
+    projected = []
+    for showtime in existing:
+        if showtime.id in archived or (showtime.status != "active" and showtime.id not in updated):
+            continue
+        source = updated.get(showtime.id, showtime)
+        projected.append(_schedule_entry(source))
+    projected.extend(_schedule_entry(row) for row in diff.adds)
+    projected.sort(key=lambda entry: (entry["start"], entry["auditorium"]))
+    return projected
+
+
+def _schedule_entry(source: CsvRow | Showtime) -> dict:
+    return {
+        "title": source.movie_title,
+        "auditorium": source.auditorium,
+        "start": source.start_time.isoformat(),
+        "end": source.end_time.isoformat(),
+        "format": source.format,
+    }
+
+
+def review_schedule(
+    ai: AiClient, theater_name: str, diff: ScheduleDiff, existing: list[Showtime]
+) -> ReviewResponse | None:
+    """Summarize the upload in plain language and flag suspicious rows."""
+    if not ai.enabled:
+        return None
+
+    schedule = projected_schedule(existing, diff)[:MAX_REVIEW_ROWS]
+    changes = {
+        "adds": [_schedule_entry(row) for row in diff.adds],
+        "updates": [
+            {"title": showtime.movie_title, "start": showtime.start_time.isoformat(),
+             "changes": [f"{c.field}: {c.old_value} -> {c.new_value}" for c in changes]}
+            for showtime, _, changes in diff.updates
+        ],
+        "archives": [_schedule_entry(showtime) for showtime in diff.archives],
+    }
+    prompt = (
+        f"You are reviewing a partner CSV upload for the cinema {json.dumps(theater_name)} "
+        "before an administrator applies it.\n\n"
+        "Changes the upload would make:\n"
+        + json.dumps(changes, indent=1)
+        + "\n\nResulting active schedule (sorted by start time):\n"
+        + json.dumps(schedule, indent=1)
+        + "\n\nWrite a two-sentence summary of what this upload does. Then list warnings "
+        "for anything an operator should double-check: a screening that ends before it "
+        "starts, two screenings overlapping in the same auditorium, a runtime under 40 "
+        "minutes or over 4 hours, or an archive that looks accidental. Use the exact title "
+        "and start value from the data in each warning. No warnings is a valid answer."
+    )
+
+    response = ai.generate(prompt, ReviewResponse)
+    if response is None:
+        return None
+    response.summary = response.summary.strip()
+    response.warnings = response.warnings[:MAX_WARNINGS]
+    return response

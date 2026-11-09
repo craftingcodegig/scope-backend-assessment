@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .db import IS_SERVERLESS
 from .models import create_schema
 from .routers import schedule, showtimes, users
 
@@ -19,7 +20,11 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    create_schema()
+    # Locally the schema is created on startup for convenience. On a serverless
+    # platform every cold start would repeat the DDL, so there the schema is
+    # created once by running `python -m app.seed` against the database.
+    if not IS_SERVERLESS:
+        create_schema()
     yield
 
 

@@ -32,8 +32,21 @@ interface RequestOptions {
   form?: FormData;
 }
 
+/**
+ * Build the request URL. The base may be absolute ("http://localhost:8000")
+ * or a path on the same origin ("/api", used on Vercel where the API is a
+ * function next to the frontend).
+ */
+function apiUrl(path: string): URL {
+  const base = env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  if (base.startsWith("/")) {
+    return new URL(base + path, window.location.origin);
+  }
+  return new URL(base + path);
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(path, env.NEXT_PUBLIC_API_URL);
+  const url = apiUrl(path);
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined && value !== null && value !== "") {
       url.searchParams.set(key, String(value));

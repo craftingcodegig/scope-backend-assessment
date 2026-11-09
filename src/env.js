@@ -18,7 +18,8 @@ export const env = createEnv({
    * `NEXT_PUBLIC_`.
    */
   client: {
-    NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:8000"),
+    // Absolute URL in development, or a same-origin path such as "/api" on Vercel.
+    NEXT_PUBLIC_API_URL: z.string().min(1).default("http://localhost:8000"),
   },
 
   /**

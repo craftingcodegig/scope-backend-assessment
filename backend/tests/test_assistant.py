@@ -6,7 +6,10 @@ from pydantic import BaseModel
 from app.assistant import (
     ColumnMappingResponse,
     MatchVerdictsResponse,
+    ReviewResponse,
     candidate_pairs,
+    projected_schedule,
+    review_schedule,
     suggest_column_mapping,
     suggest_matches,
 )
@@ -174,3 +177,35 @@ def test_apply_accepted_matches_ignores_stale_pairs(respelled_diff):
     add = respelled_diff.adds[0]
     result = apply_accepted_matches(respelled_diff, {row_key(add): "no-such-id"})
     assert len(result.adds) == 1 and len(result.archives) == 1
+
+
+def test_projected_schedule_reflects_adds_updates_and_archives():
+    existing = _showtimes_from_csv(SAMPLES / "existing.csv")
+    rows = parse_csv((SAMPLES / "new-drop.csv").read_text(encoding="utf-8"), "Downtown Cinema 7")
+    schedule = projected_schedule(existing, diff_schedule(existing, rows))
+
+    titles = [entry["title"] for entry in schedule]
+    assert "Kung Fu Panda 4" in titles  # added
+    assert "Wonka" not in titles and "Oppenheimer" not in titles  # archived
+    assert "DUNE PART 2" in titles and "Dune: Part Two" not in titles[:3]  # updated spelling
+    assert schedule == sorted(schedule, key=lambda e: (e["start"], e["auditorium"]))
+
+
+def test_review_schedule_passes_through_and_caps_warnings(respelled_diff):
+    existing = _showtimes_from_csv(SAMPLES / "existing.csv")
+    warning = {"movie_title": "Wonka", "start_time": "2025-03-15T16:00:00+00:00", "message": "x"}
+    response = ReviewResponse(summary="  Two sentences.  ", warnings=[warning] * 30)
+
+    ai = FakeAi(response)
+    review = review_schedule(ai, "Downtown Cinema 7", respelled_diff, existing)
+
+    assert review is not None
+    assert review.summary == "Two sentences."
+    assert len(review.warnings) == 20
+    assert "Spiderman Homecoming" in ai.prompts[0] and "Downtown Cinema 7" in ai.prompts[0]
+
+
+def test_review_schedule_is_none_when_disabled_or_failing(respelled_diff):
+    existing = _showtimes_from_csv(SAMPLES / "existing.csv")
+    assert review_schedule(FakeAi(None, enabled=False), "T", respelled_diff, existing) is None
+    assert review_schedule(FakeAi(None), "T", respelled_diff, existing) is None

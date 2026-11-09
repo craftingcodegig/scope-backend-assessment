@@ -70,6 +70,7 @@ class ShowtimeUpdate(ApiModel):
 
 
 class PreviewAdd(ApiModel):
+    row_key: str
     movie_title: str
     auditorium: str
     start_time: datetime
@@ -100,10 +101,41 @@ class PreviewArchive(ApiModel):
     end_time: datetime
 
 
+class ColumnMappingOut(ApiModel):
+    source: str
+    target: str
+
+
+class MatchSuggestionOut(ApiModel):
+    row_key: str
+    showtime_id: str
+    csv_title: str
+    existing_title: str
+    confidence: float
+    reason: str
+
+
+class ReviewWarningOut(ApiModel):
+    movie_title: str
+    start_time: str
+    message: str
+
+
+class AssistantOut(ApiModel):
+    """What the AI upload assistant contributed to a preview."""
+
+    enabled: bool
+    column_mapping: list[ColumnMappingOut] = []
+    suggestions: list[MatchSuggestionOut] = []
+    summary: str | None = None
+    warnings: list[ReviewWarningOut] = []
+
+
 class PreviewChanges(ApiModel):
     adds: list[PreviewAdd]
     updates: list[PreviewUpdate]
     archives: list[PreviewArchive]
+    assistant: AssistantOut
 
 
 class ApplyResult(ApiModel):

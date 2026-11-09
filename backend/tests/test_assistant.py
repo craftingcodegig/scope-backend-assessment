@@ -3,8 +3,22 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from app.assistant import ColumnMappingResponse, suggest_column_mapping
-from app.ingest import MissingColumnsError, parse_csv, read_header_and_samples
+from app.assistant import (
+    ColumnMappingResponse,
+    MatchVerdictsResponse,
+    candidate_pairs,
+    suggest_column_mapping,
+    suggest_matches,
+)
+from app.ingest import (
+    MissingColumnsError,
+    apply_accepted_matches,
+    diff_schedule,
+    parse_csv,
+    read_header_and_samples,
+    row_key,
+)
+from tests.test_ingest import _showtimes_from_csv
 
 SAMPLES = Path(__file__).resolve().parents[2] / "sample-data"
 
@@ -89,3 +103,74 @@ def test_suggest_column_mapping_is_skipped_when_disabled():
     ai = FakeAi(None, enabled=False)
     assert suggest_column_mapping(ai, ["Film"], []) is None
     assert ai.prompts == []
+
+
+# A respelling the normalizer cannot bridge: "Spiderman" vs "Spider-Man".
+RESPELLED_CSV = (
+    "theater_name,movie_title,auditorium,start_time,end_time,language,format,rating\n"
+    "Downtown Cinema 7,Spiderman Homecoming,Auditorium 1,2025-03-15T18:00:00Z,2025-03-15T20:13:00Z,EN,2D,PG-13\n"
+    "Downtown Cinema 7,Inside Out 2,Auditorium 2,2025-03-15T17:30:00Z,2025-03-15T19:20:00Z,EN,3D,PG\n"
+    "Downtown Cinema 7,Dune: Part Two,Auditorium 1,2025-03-15T20:00:00Z,2025-03-15T22:46:00Z,EN,2D,PG-13\n"
+    "Downtown Cinema 7,Dune: Part Two,Auditorium 1,2025-03-15T22:45:00Z,2025-03-16T01:31:00Z,EN,2D,PG-13\n"
+    "Downtown Cinema 7,Wonka,Auditorium 3,2025-03-15T16:00:00Z,2025-03-15T17:56:00Z,EN,2D,PG\n"
+    "Downtown Cinema 7,Oppenheimer,Auditorium 4,2025-03-15T21:00:00Z,2025-03-16T00:00:00Z,EN,IMAX,PG-13\n"
+)
+
+
+@pytest.fixture
+def respelled_diff():
+    existing = _showtimes_from_csv(SAMPLES / "existing.csv")
+    rows = parse_csv(RESPELLED_CSV, "Downtown Cinema 7")
+    return diff_schedule(existing, rows)
+
+
+def test_candidate_pairs_are_adds_and_archives_at_the_same_start(respelled_diff):
+    pairs = candidate_pairs(respelled_diff)
+    assert [(row.movie_title, st.movie_title) for row, st in pairs] == [
+        ("Spiderman Homecoming", "Spider‑Man: Homecoming")
+    ]
+
+
+def test_suggest_matches_filters_low_confidence_and_bad_indexes(respelled_diff):
+    response = MatchVerdictsResponse(
+        verdicts=[
+            {"pair_index": 0, "same_movie": True, "confidence": 0.95, "reason": "Same film, hyphen dropped."},
+            {"pair_index": 7, "same_movie": True, "confidence": 0.99, "reason": "bogus index"},
+        ]
+    )
+    suggestions = suggest_matches(FakeAi(response), respelled_diff)
+    assert len(suggestions) == 1
+    assert suggestions[0].csv_title == "Spiderman Homecoming"
+    assert suggestions[0].showtime_id == respelled_diff.archives[0].id
+
+    weak = MatchVerdictsResponse(
+        verdicts=[{"pair_index": 0, "same_movie": True, "confidence": 0.4, "reason": "unsure"}]
+    )
+    assert suggest_matches(FakeAi(weak), respelled_diff) == []
+
+
+def test_suggest_matches_skips_model_when_nothing_to_ask():
+    existing = _showtimes_from_csv(SAMPLES / "existing.csv")
+    unchanged = parse_csv((SAMPLES / "existing.csv").read_text(encoding="utf-8"), "Downtown Cinema 7")
+    ai = FakeAi(None)
+    assert suggest_matches(ai, diff_schedule(existing, unchanged)) == []
+    assert ai.prompts == []
+
+
+def test_apply_accepted_matches_turns_add_and_archive_into_update(respelled_diff):
+    add = respelled_diff.adds[0]
+    archived = respelled_diff.archives[0]
+
+    result = apply_accepted_matches(respelled_diff, {row_key(add): archived.id})
+
+    assert result.adds == []
+    assert result.archives == []
+    (showtime, row, changes) = result.updates[-1]
+    assert showtime is archived and row is add
+    assert {c.field for c in changes} == {"movieTitle"}
+
+
+def test_apply_accepted_matches_ignores_stale_pairs(respelled_diff):
+    add = respelled_diff.adds[0]
+    result = apply_accepted_matches(respelled_diff, {row_key(add): "no-such-id"})
+    assert len(result.adds) == 1 and len(result.archives) == 1

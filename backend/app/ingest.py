@@ -26,6 +26,28 @@ class CsvError(ValueError):
     """Raised for a malformed upload; the message is safe to show to users."""
 
 
+class MissingColumnsError(CsvError):
+    """The header does not contain every required column."""
+
+    def __init__(self, missing: list[str], headers: list[str]) -> None:
+        super().__init__(f"Missing columns: {', '.join(missing)}")
+        self.missing = missing
+        self.headers = headers
+
+
+def read_header_and_samples(content: str, limit: int = 3) -> tuple[list[str], list[list[str]]]:
+    """Return the cleaned header row and up to `limit` data rows for inspection."""
+    reader = csv.reader(io.StringIO(content.lstrip("﻿")))
+    headers = [clean_text(name) for name in next(reader, [])]
+    samples: list[list[str]] = []
+    for row in reader:
+        if any(cell.strip() for cell in row):
+            samples.append([clean_text(cell) for cell in row])
+        if len(samples) >= limit:
+            break
+    return headers, samples
+
+
 @dataclass(frozen=True)
 class CsvRow:
     movie_title: str
@@ -53,24 +75,35 @@ def _parse_datetime(value: str, column: str, line: int) -> datetime:
     return parsed
 
 
-def parse_csv(content: str, theater_name: str) -> list[CsvRow]:
+def parse_csv(
+    content: str, theater_name: str, column_mapping: dict[str, str] | None = None
+) -> list[CsvRow]:
     """Parse a partner drop for one theater into cleaned, de-duplicated rows.
 
     Whitespace is trimmed and collapsed in every cell. Rows naming a different
     theater are rejected. When the same movie and start time appears more than
     once, the last row wins, so the result has at most one row per key.
+
+    `column_mapping` renames partner headers to our column names, e.g.
+    {"Film": "movie_title"}; it is how uploads with unfamiliar headers get in.
     """
     reader = csv.DictReader(io.StringIO(content.lstrip("\ufeff")))
-    header = [clean_text(name).lower() for name in reader.fieldnames or []]
-    missing = [column for column in REQUIRED_COLUMNS if column not in header]
+    rename = {clean_text(k).lower(): v for k, v in (column_mapping or {}).items()}
+
+    def column(name: str) -> str:
+        cleaned = clean_text(name).lower()
+        return rename.get(cleaned, cleaned)
+
+    header = [column(name) for name in reader.fieldnames or []]
+    missing = [name for name in REQUIRED_COLUMNS if name not in header]
     if missing:
-        raise CsvError(f"Missing columns: {', '.join(missing)}")
+        raise MissingColumnsError(missing, [clean_text(n) for n in reader.fieldnames or []])
 
     expected_theater = clean_text(theater_name).casefold()
     rows: dict[tuple[str, datetime], CsvRow] = {}
 
     for line, raw in enumerate(reader, start=2):
-        cells = {clean_text(k).lower(): clean_text(v) for k, v in raw.items() if k}
+        cells = {column(k): clean_text(v) for k, v in raw.items() if k}
         if not any(cells.values()):
             continue  # blank line
         if cells["theater_name"].casefold() != expected_theater:

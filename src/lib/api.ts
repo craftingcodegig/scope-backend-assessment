@@ -1,7 +1,9 @@
 import { env } from "~/env";
 import type {
+  AcceptedMatch,
   ApplyResult,
   AssessmentUser,
+  ColumnMapping,
   FilterOptions,
   MovieStatus,
   PreviewChanges,
@@ -127,9 +129,24 @@ export const api = {
     });
   },
 
-  applySchedule: (userId: string, theaterId: string, file: File) => {
+  applySchedule: (
+    userId: string,
+    theaterId: string,
+    file: File,
+    decisions: { columnMapping?: ColumnMapping[]; acceptedMatches?: AcceptedMatch[] } = {},
+  ) => {
     const form = new FormData();
     form.append("file", file);
+    // Echo the assistant decisions shown in the preview so apply uses them.
+    if (decisions.columnMapping?.length) {
+      const mapping = Object.fromEntries(
+        decisions.columnMapping.map((m) => [m.source, m.target]),
+      );
+      form.append("column_mapping", JSON.stringify(mapping));
+    }
+    if (decisions.acceptedMatches?.length) {
+      form.append("accepted_matches", JSON.stringify(decisions.acceptedMatches));
+    }
     return request<ApplyResult>(`/theaters/${theaterId}/schedule/apply`, {
       method: "POST",
       userId,

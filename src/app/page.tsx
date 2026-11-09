@@ -26,6 +26,13 @@ const emptyPreview: PreviewChanges = {
   adds: [],
   updates: [],
   archives: [],
+  assistant: {
+    enabled: false,
+    columnMapping: [],
+    suggestions: [],
+    summary: null,
+    warnings: [],
+  },
 };
 
 const emptyFilters = {

@@ -54,6 +54,7 @@ export interface ShowtimeUpdate {
 }
 
 export interface ShowtimeAdd {
+  rowKey: string;
   movieTitle: string;
   auditorium: string;
   startTime: string;
@@ -70,10 +71,46 @@ export interface ShowtimeArchive {
   endTime: string;
 }
 
+export interface ColumnMapping {
+  source: string;
+  target: string;
+}
+
+export interface MatchSuggestion {
+  rowKey: string;
+  showtimeId: string;
+  csvTitle: string;
+  existingTitle: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface ReviewWarning {
+  movieTitle: string;
+  startTime: string;
+  message: string;
+}
+
+/** What the AI upload assistant contributed to a preview. */
+export interface AssistantInfo {
+  enabled: boolean;
+  columnMapping: ColumnMapping[];
+  suggestions: MatchSuggestion[];
+  summary: string | null;
+  warnings: ReviewWarning[];
+}
+
 export interface PreviewChanges {
   adds: ShowtimeAdd[];
   updates: ShowtimeUpdate[];
   archives: ShowtimeArchive[];
+  assistant: AssistantInfo;
+}
+
+/** A suggestion the admin accepted; sent back when applying. */
+export interface AcceptedMatch {
+  rowKey: string;
+  showtimeId: string;
 }
 
 export interface ShowtimePage {

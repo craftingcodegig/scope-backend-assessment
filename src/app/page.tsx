@@ -6,6 +6,7 @@ import { useDebounce } from "~/lib/hooks/useDebounce";
 import { useMockSession } from "~/lib/mock-session";
 import {
   movieStatusOptions,
+  type AcceptedMatch,
   type FilterOptions,
   type MovieStatus,
   type PreviewChanges,
@@ -200,11 +201,14 @@ export default function Home() {
     }
   };
 
-  const handleConfirmChanges = async () => {
+  const handleConfirmChanges = async (acceptedMatches: AcceptedMatch[]) => {
     if (!userId || !pendingFile || selectedTheaterId === "all") return;
     setIsApplying(true);
     try {
-      await api.applySchedule(userId, selectedTheaterId, pendingFile);
+      await api.applySchedule(userId, selectedTheaterId, pendingFile, {
+        columnMapping: previewData.assistant.columnMapping,
+        acceptedMatches,
+      });
       setIsPreviewOpen(false);
       setPendingFile(null);
       await loadShowtimes();
@@ -452,7 +456,7 @@ export default function Home() {
             setIsPreviewOpen(false);
             setPendingFile(null);
           }}
-          onConfirm={() => void handleConfirmChanges()}
+          onConfirm={(accepted) => void handleConfirmChanges(accepted)}
           changes={previewData}
           isApplying={isApplying}
         />

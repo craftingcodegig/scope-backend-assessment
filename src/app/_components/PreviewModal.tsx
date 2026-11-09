@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type {
+  AcceptedMatch,
   AssistantInfo,
+  MatchSuggestion,
   PreviewChanges,
   ShowtimeAdd,
   ShowtimeUpdate,
@@ -11,7 +14,7 @@ import type {
 interface PreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (acceptedMatches: AcceptedMatch[]) => void;
   changes: PreviewChanges;
   isApplying: boolean;
 }
@@ -27,7 +30,7 @@ const formatDateTime = (dateStr: string) => {
 
 function AssistantPanel({ assistant }: { assistant: AssistantInfo }) {
   const hasContent =
-    assistant.summary ||
+    Boolean(assistant.summary) ||
     assistant.columnMapping.length > 0 ||
     assistant.warnings.length > 0;
 
@@ -75,6 +78,58 @@ function AssistantPanel({ assistant }: { assistant: AssistantInfo }) {
   );
 }
 
+function SuggestionList({
+  suggestions,
+  accepted,
+  onToggle,
+}: {
+  suggestions: MatchSuggestion[];
+  accepted: Record<string, string>;
+  onToggle: (suggestion: MatchSuggestion, checked: boolean) => void;
+}) {
+  if (suggestions.length === 0) return null;
+  return (
+    <div>
+      <h3 className="mb-3 flex items-center text-lg font-semibold text-purple-300">
+        <span className="mr-2 flex h-6 w-6 items-center justify-center rounded-full bg-purple-900 text-xs">
+          {suggestions.length}
+        </span>
+        Suggested Matches
+      </h3>
+      <p className="mb-2 text-xs text-gray-400">
+        These new rows look like respellings of showtimes that would otherwise
+        be archived. Tick a suggestion to update the existing showtime instead.
+      </p>
+      <div className="space-y-2">
+        {suggestions.map((s) => (
+          <label
+            key={s.rowKey}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-purple-900 bg-purple-950 bg-opacity-30 p-4"
+          >
+            <input
+              type="checkbox"
+              checked={accepted[s.rowKey] === s.showtimeId}
+              onChange={(e) => onToggle(s, e.target.checked)}
+              className="mt-1 h-4 w-4 accent-purple-500"
+            />
+            <div className="text-sm">
+              <div className="text-white">
+                <span className="font-semibold">{s.csvTitle}</span>
+                <span className="text-gray-400"> is probably </span>
+                <span className="font-semibold">{s.existingTitle}</span>
+                <span className="ml-2 text-xs text-gray-400">
+                  {Math.round(s.confidence * 100)}% confident
+                </span>
+              </div>
+              <div className="mt-1 text-gray-400">{s.reason}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PreviewModal({
   isOpen,
   onClose,
@@ -82,7 +137,34 @@ export function PreviewModal({
   changes,
   isApplying,
 }: PreviewModalProps) {
+  // Accepted suggestions, keyed by CSV row key -> existing showtime id.
+  const [accepted, setAccepted] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setAccepted({});
+  }, [changes]);
+
   if (!isOpen) return null;
+
+  const acceptedShowtimeIds = new Set(Object.values(accepted));
+
+  const handleToggle = (suggestion: MatchSuggestion, checked: boolean) => {
+    setAccepted((current) => {
+      const next = { ...current };
+      if (checked) next[suggestion.rowKey] = suggestion.showtimeId;
+      else delete next[suggestion.rowKey];
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    onConfirm(
+      Object.entries(accepted).map(([rowKey, showtimeId]) => ({
+        rowKey,
+        showtimeId,
+      })),
+    );
+  };
 
   const totalChanges =
     changes.adds.length + changes.updates.length + changes.archives.length;
@@ -104,6 +186,12 @@ export function PreviewModal({
         <div className="space-y-6 p-6">
           <AssistantPanel assistant={changes.assistant} />
 
+          <SuggestionList
+            suggestions={changes.assistant.suggestions}
+            accepted={accepted}
+            onToggle={handleToggle}
+          />
+
           {totalChanges === 0 ? (
             <p className="text-center text-gray-400">
               No changes detected. The schedule is already up to date.
@@ -123,10 +211,19 @@ export function PreviewModal({
                     {changes.adds.map((add: ShowtimeAdd) => (
                       <div
                         key={add.rowKey}
-                        className="rounded-lg border border-green-900 bg-green-950 bg-opacity-30 p-4"
+                        className={`rounded-lg border border-green-900 bg-green-950 bg-opacity-30 p-4 ${
+                          accepted[add.rowKey] ? "opacity-60" : ""
+                        }`}
                       >
-                        <div className="font-semibold text-white">
-                          {add.movieTitle}
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-white">
+                            {add.movieTitle}
+                          </span>
+                          {accepted[add.rowKey] && (
+                            <span className="rounded-full bg-purple-900 px-2 py-0.5 text-xs text-purple-200">
+                              will update existing showtime
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 text-sm text-gray-300">
                           {formatDateTime(add.startTime)} –{" "}
@@ -204,7 +301,9 @@ export function PreviewModal({
                     {changes.archives.map((archive: ShowtimeArchive) => (
                       <div
                         key={archive.id}
-                        className="rounded-lg border border-red-900 bg-red-950 bg-opacity-30 p-4"
+                        className={`rounded-lg border border-red-900 bg-red-950 bg-opacity-30 p-4 ${
+                          acceptedShowtimeIds.has(archive.id) ? "opacity-60" : ""
+                        }`}
                       >
                         <div className="font-semibold text-white">
                           {archive.movieTitle}
@@ -214,7 +313,9 @@ export function PreviewModal({
                           {formatDateTime(archive.endTime)}
                         </div>
                         <div className="mt-1 text-xs text-gray-400">
-                          Not present in new drop
+                          {acceptedShowtimeIds.has(archive.id)
+                            ? "Kept: matched to a new row above"
+                            : "Not present in new drop"}
                         </div>
                       </div>
                     ))}
@@ -235,7 +336,7 @@ export function PreviewModal({
               Cancel
             </button>
             <button
-              onClick={onConfirm}
+              onClick={handleConfirm}
               disabled={isApplying || totalChanges === 0}
               className="rounded-lg bg-purple-600 px-6 py-2 font-medium text-white transition hover:bg-purple-700 disabled:opacity-50"
             >

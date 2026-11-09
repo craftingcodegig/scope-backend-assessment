@@ -1,0 +1,5 @@
+backend/.venv
+backend/tests
+backend/**/__pycache__
+.pytest_cache
+sample-data

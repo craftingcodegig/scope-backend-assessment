@@ -156,6 +156,22 @@ def _as_text(value: object) -> str:
     return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
+def row_key(row: CsvRow) -> str:
+    """Stable string identity for a CSV row, used to refer to it across requests."""
+    return f"{row.normalized_title}|{row.start_time.isoformat()}"
+
+
+def _field_changes(showtime: Showtime, row: CsvRow) -> list[FieldDiff]:
+    changes = [
+        FieldDiff(label, _as_text(getattr(showtime, field)), _as_text(getattr(row, field)))
+        for field, label in UPDATABLE_FIELDS.items()
+        if getattr(showtime, field) != getattr(row, field)
+    ]
+    if showtime.status != "active":
+        changes.append(FieldDiff("status", showtime.status, "active"))
+    return changes
+
+
 def _pick_match(candidates: list[Showtime]) -> Showtime:
     # Prefer the active row; otherwise the most recently touched one.
     active = [row for row in candidates if row.status == "active"]
@@ -186,13 +202,7 @@ def diff_schedule(existing: list[Showtime], rows: list[CsvRow]) -> ScheduleDiff:
             continue
 
         showtime = _pick_match(candidates)
-        changes = [
-            FieldDiff(label, _as_text(getattr(showtime, field)), _as_text(getattr(row, field)))
-            for field, label in UPDATABLE_FIELDS.items()
-            if getattr(showtime, field) != getattr(row, field)
-        ]
-        if showtime.status != "active":
-            changes.append(FieldDiff("status", showtime.status, "active"))
+        changes = _field_changes(showtime, row)
         if changes:
             diff.updates.append((showtime, row, changes))
 
@@ -201,4 +211,25 @@ def diff_schedule(existing: list[Showtime], rows: list[CsvRow]) -> ScheduleDiff:
             diff.archives.extend(row for row in candidates if row.status == "active")
 
     diff.archives.sort(key=lambda row: row.start_time)
+    return diff
+
+
+def apply_accepted_matches(diff: ScheduleDiff, accepted: dict[str, str]) -> ScheduleDiff:
+    """Turn accepted (row key -> showtime id) pairs from an add plus an archive
+    into a single update. Pairs that no longer line up are ignored."""
+    if not accepted:
+        return diff
+
+    archives_by_id = {showtime.id: showtime for showtime in diff.archives}
+    remaining_adds: list[CsvRow] = []
+    for row in diff.adds:
+        showtime = archives_by_id.get(accepted.get(row_key(row), ""))
+        if showtime is None or showtime.start_time != row.start_time:
+            remaining_adds.append(row)
+            continue
+        del archives_by_id[showtime.id]
+        diff.archives.remove(showtime)
+        diff.updates.append((showtime, row, _field_changes(showtime, row)))
+
+    diff.adds = remaining_adds
     return diff

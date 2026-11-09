@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  AssistantInfo,
   PreviewChanges,
   ShowtimeAdd,
   ShowtimeUpdate,
@@ -15,6 +16,65 @@ interface PreviewModalProps {
   isApplying: boolean;
 }
 
+const formatDateTime = (dateStr: string) => {
+  return new Date(dateStr).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+function AssistantPanel({ assistant }: { assistant: AssistantInfo }) {
+  const hasContent =
+    assistant.summary ||
+    assistant.columnMapping.length > 0 ||
+    assistant.warnings.length > 0;
+
+  if (!assistant.enabled || !hasContent) return null;
+
+  return (
+    <div className="rounded-lg border border-purple-900 bg-purple-950 bg-opacity-30 p-4">
+      <h3 className="mb-2 text-sm font-semibold uppercase text-purple-300">
+        AI review
+      </h3>
+      {assistant.summary && (
+        <p className="text-sm text-gray-200">{assistant.summary}</p>
+      )}
+
+      {assistant.columnMapping.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs text-gray-400">
+            This file used unfamiliar column names. They were read as:
+          </p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            {assistant.columnMapping.map((m) => (
+              <span
+                key={m.source}
+                className="rounded bg-gray-800 px-2 py-1 font-mono text-xs text-gray-300"
+              >
+                {m.source} → {m.target}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {assistant.warnings.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {assistant.warnings.map((w, idx) => (
+            <li key={idx} className="text-sm text-amber-300">
+              <span className="font-medium">{w.movieTitle}</span>
+              <span className="text-gray-400"> at {formatDateTime(w.startTime)}: </span>
+              {w.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function PreviewModal({
   isOpen,
   onClose,
@@ -23,15 +83,6 @@ export function PreviewModal({
   isApplying,
 }: PreviewModalProps) {
   if (!isOpen) return null;
-
-  const formatDateTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
 
   const totalChanges =
     changes.adds.length + changes.updates.length + changes.archives.length;
@@ -50,13 +101,15 @@ export function PreviewModal({
           </h2>
         </div>
 
-        <div className="p-6">
+        <div className="space-y-6 p-6">
+          <AssistantPanel assistant={changes.assistant} />
+
           {totalChanges === 0 ? (
             <p className="text-center text-gray-400">
               No changes detected. The schedule is already up to date.
             </p>
           ) : (
-            <div className="space-y-6">
+            <>
               {/* Adds */}
               {changes.adds.length > 0 && (
                 <div>
@@ -67,9 +120,9 @@ export function PreviewModal({
                     New Showtimes
                   </h3>
                   <div className="space-y-2">
-                    {changes.adds.map((add: ShowtimeAdd, idx: number) => (
+                    {changes.adds.map((add: ShowtimeAdd) => (
                       <div
-                        key={idx}
+                        key={add.rowKey}
                         className="rounded-lg border border-green-900 bg-green-950 bg-opacity-30 p-4"
                       >
                         <div className="font-semibold text-white">
@@ -118,10 +171,7 @@ export function PreviewModal({
                         </div>
                         <div className="mt-2 space-y-1">
                           {update.diffs.map((diff, idx) => (
-                            <div
-                              key={idx}
-                              className="text-sm"
-                            >
+                            <div key={idx} className="text-sm">
                               <span className="text-gray-400">
                                 {diff.field}:
                               </span>{" "}
@@ -171,7 +221,7 @@ export function PreviewModal({
                   </div>
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 

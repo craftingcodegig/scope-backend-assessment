@@ -1,11 +1,7 @@
-fastapi==0.115.6
+# Runtime dependencies live in the repository root (Vercel reads that file).
+-r ../requirements.txt
+
+# Local development and tests only
 uvicorn[standard]==0.34.0
-pydantic==2.14.3
-python-multipart==0.0.20
-sqlalchemy==2.0.36
-psycopg[binary]==3.2.3
 httpx==0.28.1
 pytest==8.3.4
-python-dotenv==1.0.1
-google-genai==3.0.0
-anthropic==2.7.0

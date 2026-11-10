@@ -1,2 +1,10 @@
-# Vercel installs Python dependencies from the repository root.
--r backend/requirements.txt
+# Runtime dependencies of the FastAPI backend. Vercel installs this file for
+# the Python function; backend/requirements.txt includes it for local work.
+fastapi==0.115.6
+pydantic==2.14.3
+python-multipart==0.0.20
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+google-genai==3.0.0
+anthropic==2.7.0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -129,12 +130,19 @@ def preview_schedule(
     theater = _theater_for_admin(db, user, theater_id)
     diff, existing, mapping = _compute_diff(db, theater, _read_upload(file), ai, None)
 
-    review = review_schedule(ai, theater.name, diff, existing)
+    # The two model calls only read the diff and are independent of each
+    # other, so run them side by side instead of paying for both in sequence.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        suggestions_job = pool.submit(suggest_matches, ai, diff)
+        review_job = pool.submit(review_schedule, ai, theater.name, diff, existing)
+    suggestions = suggestions_job.result()
+    review = review_job.result()
+
     assistant = AssistantOut(
         enabled=ai.enabled,
         provider=getattr(ai, "last_provider", None),
         column_mapping=[ColumnMappingOut(source=s, target=t) for s, t in (mapping or {}).items()],
-        suggestions=[MatchSuggestionOut.model_validate(s) for s in suggest_matches(ai, diff)],
+        suggestions=[MatchSuggestionOut.model_validate(s) for s in suggestions],
         summary=review.summary if review else None,
         warnings=[ReviewWarningOut.model_validate(w) for w in review.warnings] if review else [],
     )

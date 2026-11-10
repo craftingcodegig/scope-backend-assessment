@@ -17,11 +17,12 @@ cp .env.example .env
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/scopelabs"
 NEXT_PUBLIC_API_URL="http://localhost:8000"
-GEMINI_API_KEY=""   # optional; enables the AI upload assistant
+GEMINI_API_KEY=""      # optional; enables the AI upload assistant
+ANTHROPIC_API_KEY=""   # optional; fallback provider, or the only one
 ```
 
 Tables, indexes and the `pg_trgm` extension are created automatically when the
-backend starts, so no migration step is needed. Without a Gemini key the app
+backend starts, so no migration step is needed. Without a model API key the app
 works exactly the same, minus the AI panel in the upload preview.
 
 ### 2. Backend
@@ -133,9 +134,19 @@ expire. Both steps run through the same code in `app/ingest.py`:
 
 ### AI upload assistant
 
-The deterministic pipeline above handles the predictable cases. An assistant
-built on the Gemini API (`gemini-2.5-flash`, via `google-genai`) covers the
-cases that need judgement, in `backend/app/assistant.py`:
+The deterministic pipeline above handles the predictable cases. A model-backed
+assistant covers the cases that need judgement, in `backend/app/assistant.py`.
+It can run on either provider, chained in `backend/app/ai.py`:
+
+- **Gemini** (`gemini-2.5-flash` via `google-genai`) is tried first when
+  `GEMINI_API_KEY` is set.
+- **Anthropic** (`claude-opus-5-5` via the `anthropic` SDK, with structured
+  output and the server-side refusal fallback enabled) answers when Gemini is
+  not configured, rejects its key, or a call fails. A rejected key disables that
+  provider for the rest of the process so later calls skip straight to the
+  fallback.
+
+The preview shows which provider answered. The assistant does three things:
 
 1. **Header mapping.** When a file does not use our column names, the header
    and a few sample rows are sent to the model, which maps them to our schema.
@@ -158,8 +169,9 @@ Design rules for the assistant:
   discarded. Mappings are checked against the real headers, suggestions
   against the real diff, so the model can only propose, never write.
 - Nothing is applied without the admin confirming in the preview.
-- The API key lives only in the server environment (`GEMINI_API_KEY`). If it
-  is missing or a call fails, the upload flow continues without the panel.
+- API keys live only in the server environment (`GEMINI_API_KEY`,
+  `ANTHROPIC_API_KEY`). If neither is set, or every provider fails, the upload
+  flow continues without the panel.
 - The tests exercise the assistant with a fake client, so the suite runs
   offline and without a key.
 
@@ -172,7 +184,7 @@ the FastAPI app as a Python function (`api/index.py`) served under `/api`.
    free tier and supports `pg_trgm`.
 2. Import the repository into Vercel and set these environment variables:
    - `DATABASE_URL`: the Postgres connection string (use the pooled one if offered).
-   - `GEMINI_API_KEY`: from Google AI Studio.
+   - `GEMINI_API_KEY` and/or `ANTHROPIC_API_KEY`: at least one, for the assistant.
    - `NEXT_PUBLIC_API_URL`: `/api`
 3. Create the schema and load the sample data once, from your machine, with
    `DATABASE_URL` pointed at the hosted database:
@@ -216,7 +228,7 @@ backend/app/
   auth.py        X-User-Id resolution and admin check
   normalize.py   title normalization
   ingest.py      CSV parsing and schedule diff
-  ai.py          Gemini client wrapper (schema-validated, disabled without a key)
+  ai.py          Gemini and Anthropic providers, fallback chain, disabled mode
   assistant.py   header mapping, match suggestions, review summary
   seed.py        loads seed_data.json
   routers/       users, showtimes, schedule endpoints

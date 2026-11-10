@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from app.ai import FallbackClient
 from app.assistant import (
     ColumnMappingResponse,
     MatchVerdictsResponse,
@@ -209,3 +210,56 @@ def test_review_schedule_is_none_when_disabled_or_failing(respelled_diff):
     existing = _showtimes_from_csv(SAMPLES / "existing.csv")
     assert review_schedule(FakeAi(None, enabled=False), "T", respelled_diff, existing) is None
     assert review_schedule(FakeAi(None), "T", respelled_diff, existing) is None
+
+
+# --- Provider fallback chain ------------------------------------------------
+
+
+class NamedFake(FakeAi):
+    def __init__(self, name, response, enabled=True):
+        super().__init__(response, enabled)
+        self.name = name
+
+
+def test_fallback_uses_first_provider_that_answers():
+    answer = ReviewResponse(summary="from claude", warnings=[])
+    gemini = NamedFake("gemini", None)  # configured, but every call fails
+    claude = NamedFake("anthropic", answer)
+    chain = FallbackClient([gemini, claude])
+
+    assert chain.enabled
+    assert chain.generate("prompt", ReviewResponse) is answer
+    assert gemini.prompts == ["prompt"] and claude.prompts == ["prompt"]
+    assert chain.last_provider == "anthropic"
+
+
+def test_fallback_prefers_gemini_when_it_answers():
+    answer = ReviewResponse(summary="from gemini", warnings=[])
+    gemini = NamedFake("gemini", answer)
+    claude = NamedFake("anthropic", ReviewResponse(summary="unused", warnings=[]))
+    chain = FallbackClient([gemini, claude])
+
+    assert chain.generate("prompt", ReviewResponse).summary == "from gemini"
+    assert claude.prompts == []
+    assert chain.last_provider == "gemini"
+
+
+def test_fallback_skips_providers_that_disabled_themselves():
+    gemini = NamedFake("gemini", None, enabled=False)  # e.g. invalid API key
+    claude = NamedFake("anthropic", ReviewResponse(summary="ok", warnings=[]))
+    chain = FallbackClient([gemini, claude])
+
+    assert chain.generate("prompt", ReviewResponse).summary == "ok"
+    assert gemini.prompts == []
+
+
+def test_fallback_is_none_when_every_provider_fails():
+    chain = FallbackClient([NamedFake("gemini", None), NamedFake("anthropic", None)])
+    assert chain.generate("prompt", ReviewResponse) is None
+    assert chain.last_provider is None
+
+
+def test_fallback_with_no_providers_is_disabled():
+    chain = FallbackClient([])
+    assert not chain.enabled
+    assert chain.generate("prompt", ReviewResponse) is None

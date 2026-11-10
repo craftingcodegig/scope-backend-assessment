@@ -94,6 +94,8 @@ export interface ReviewWarning {
 /** What the AI upload assistant contributed to a preview. */
 export interface AssistantInfo {
   enabled: boolean;
+  /** Which model provider answered: "gemini" or "anthropic". */
+  provider: string | null;
   columnMapping: ColumnMapping[];
   suggestions: MatchSuggestion[];
   summary: string | null;

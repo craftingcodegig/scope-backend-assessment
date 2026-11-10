@@ -36,10 +36,22 @@ function AssistantPanel({ assistant }: { assistant: AssistantInfo }) {
 
   if (!assistant.enabled || !hasContent) return null;
 
+  const providerLabel =
+    assistant.provider === "anthropic"
+      ? "Claude"
+      : assistant.provider === "gemini"
+        ? "Gemini"
+        : null;
+
   return (
     <div className="rounded-lg border border-purple-900 bg-purple-950 bg-opacity-30 p-4">
-      <h3 className="mb-2 text-sm font-semibold uppercase text-purple-300">
+      <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase text-purple-300">
         AI review
+        {providerLabel && (
+          <span className="rounded-full bg-purple-900 px-2 py-0.5 text-xs normal-case text-purple-200">
+            {providerLabel}
+          </span>
+        )}
       </h3>
       {assistant.summary && (
         <p className="text-sm text-gray-200">{assistant.summary}</p>

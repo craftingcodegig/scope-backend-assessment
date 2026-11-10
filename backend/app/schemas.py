@@ -125,6 +125,7 @@ class AssistantOut(ApiModel):
     """What the AI upload assistant contributed to a preview."""
 
     enabled: bool
+    provider: str | None = None  # "gemini" or "anthropic", whichever answered
     column_mapping: list[ColumnMappingOut] = []
     suggestions: list[MatchSuggestionOut] = []
     summary: str | None = None

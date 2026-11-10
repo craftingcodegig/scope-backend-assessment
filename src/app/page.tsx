@@ -29,6 +29,7 @@ const emptyPreview: PreviewChanges = {
   archives: [],
   assistant: {
     enabled: false,
+    provider: null,
     columnMapping: [],
     suggestions: [],
     summary: null,

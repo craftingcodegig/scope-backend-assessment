@@ -132,6 +132,7 @@ def preview_schedule(
     review = review_schedule(ai, theater.name, diff, existing)
     assistant = AssistantOut(
         enabled=ai.enabled,
+        provider=getattr(ai, "last_provider", None),
         column_mapping=[ColumnMappingOut(source=s, target=t) for s, t in (mapping or {}).items()],
         suggestions=[MatchSuggestionOut.model_validate(s) for s in suggest_matches(ai, diff)],
         summary=review.summary if review else None,
